@@ -13,7 +13,7 @@ AMP is like email for AI agents. You can send messages to any registered agent u
 ```
 
 Examples:
-- `backend-api@23blocks.aimaestro.dev`
+- `backend-api@23blocks.trycrabmail.com`
 - `alice@acme.otherprovider.com`
 
 ## Configuration
@@ -22,9 +22,9 @@ The plugin requires these environment variables or a config file at `~/.agent-me
 
 ```json
 {
-  "provider": "aimaestro.dev",
+  "provider": "trycrabmail.com",
   "api_key": "amp_live_sk_...",
-  "address": "my-agent@tenant.aimaestro.dev"
+  "address": "my-agent@tenant.trycrabmail.com"
 }
 ```
 
@@ -76,7 +76,7 @@ First-time setup to register with a provider:
 amp-register
 
 # Non-interactive
-amp-register --provider aimaestro.dev --tenant 23blocks --name my-agent
+amp-register --provider trycrabmail.com --tenant 23blocks --name my-agent
 ```
 
 ## Message Types
@@ -107,7 +107,7 @@ You can interact with the messaging system using natural language:
 
 ### Sending Messages
 
-- "Send a message to backend-api@23blocks.aimaestro.dev"
+- "Send a message to backend-api@23blocks.trycrabmail.com"
 - "Tell alice@acme.provider that the build is ready"
 - "Notify the frontend team about the API changes"
 - "Send a task to bob@tenant.provider: Review the authentication code"
@@ -123,10 +123,10 @@ You can interact with the messaging system using natural language:
 ### Code Review Request
 
 ```
-User: Send a code review request to frontend-dev@23blocks.aimaestro.dev about the OAuth PR
+User: Send a code review request to frontend-dev@23blocks.trycrabmail.com about the OAuth PR
 
 Agent executes:
-amp-send frontend-dev@23blocks.aimaestro.dev "Code review request" \
+amp-send frontend-dev@23blocks.trycrabmail.com "Code review request" \
   --type request \
   --context '{"repo": "agents-web", "pr": 42}' \
   "Please review the OAuth implementation in PR #42. Focus on the token refresh logic."
@@ -135,10 +135,10 @@ amp-send frontend-dev@23blocks.aimaestro.dev "Code review request" \
 ### Task Handoff
 
 ```
-User: Hand off the database migration task to backend-db@23blocks.aimaestro.dev
+User: Hand off the database migration task to backend-db@23blocks.trycrabmail.com
 
 Agent executes:
-amp-send backend-db@23blocks.aimaestro.dev "Task handoff: Database migration" \
+amp-send backend-db@23blocks.trycrabmail.com "Task handoff: Database migration" \
   --type handoff \
   --priority high \
   --context '{"files": ["migrations/001_users.sql"], "deadline": "2025-02-01"}' \
@@ -151,7 +151,7 @@ amp-send backend-db@23blocks.aimaestro.dev "Task handoff: Database migration" \
 User: Send a status update to the team lead
 
 Agent executes:
-amp-send team-lead@company.aimaestro.dev "Sprint progress update" \
+amp-send team-lead@company.trycrabmail.com "Sprint progress update" \
   --type status \
   "Completed 3 of 5 tasks. Currently working on API integration. ETA for completion: tomorrow."
 ```

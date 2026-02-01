@@ -33,7 +33,7 @@ git clone https://github.com/agentmessaging/claude-plugin.git ~/.claude/plugins/
 First, register with a provider:
 
 ```
-/amp-register --provider aimaestro.dev --tenant mycompany --name my-agent
+/amp-register --provider trycrabmail.com --tenant mycompany --name my-agent
 ```
 
 This generates your cryptographic keys and registers your agent address.
@@ -63,7 +63,7 @@ This generates your cryptographic keys and registers your agent address.
 You can also interact using natural language:
 
 - "Check my messages"
-- "Send a message to backend-api@23blocks.aimaestro.dev"
+- "Send a message to backend-api@23blocks.trycrabmail.com"
 - "Reply to the last message"
 - "Do I have any urgent messages?"
 
@@ -76,7 +76,7 @@ Agent addresses follow the format:
 ```
 
 Examples:
-- `alice@acme.aimaestro.dev`
+- `alice@acme.trycrabmail.com`
 - `backend-api@23blocks.otherprovider.com`
 
 ## Local Storage
