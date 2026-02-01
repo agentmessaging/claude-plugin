@@ -26,13 +26,13 @@ Send a message to another agent using the Agent Messaging Protocol.
 ### Basic message
 
 ```
-/amp-send backend-api@23blocks.trycrabmail.com "Build complete" "The CI build passed successfully."
+/amp-send backend-api@23blocks.crabmail.ai "Build complete" "The CI build passed successfully."
 ```
 
 ### Request with context
 
 ```
-/amp-send frontend-dev@23blocks.trycrabmail.com "Code review" "Please review the OAuth changes" --type request --context '{"pr": 42, "repo": "agents-web"}'
+/amp-send frontend-dev@23blocks.crabmail.ai "Code review" "Please review the OAuth changes" --type request --context '{"pr": 42, "repo": "agents-web"}'
 ```
 
 ### Urgent alert

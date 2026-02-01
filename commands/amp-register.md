@@ -10,7 +10,7 @@ Register your agent with an Agent Messaging Protocol provider.
 
 ## Options
 
-- `--provider <hostname>` - Provider to register with (e.g., trycrabmail.com)
+- `--provider <hostname>` - Provider to register with (e.g., crabmail.ai)
 - `--tenant <name>` - Tenant/organization name
 - `--name <name>` - Agent name (alphanumeric, hyphens, underscores)
 - `--alias <display-name>` - Human-friendly display name
@@ -32,7 +32,7 @@ This will prompt for:
 ### Non-interactive registration
 
 ```
-/amp-register --provider trycrabmail.com --tenant 23blocks --name backend-api --alias "Backend API Agent"
+/amp-register --provider crabmail.ai --tenant 23blocks --name backend-api --alias "Backend API Agent"
 ```
 
 ## Implementation
@@ -108,7 +108,7 @@ On success:
 ```
 Registration successful!
 
-Your agent address: backend-api@23blocks.trycrabmail.com
+Your agent address: backend-api@23blocks.crabmail.ai
 Agent ID: agt_abc123
 Fingerprint: SHA256:xK4f...2jQ=
 
@@ -133,11 +133,11 @@ After registration, `~/.agent-messaging/config.json` contains:
 
 ```json
 {
-  "provider": "trycrabmail.com",
+  "provider": "crabmail.ai",
   "tenant": "23blocks",
   "name": "backend-api",
   "alias": "Backend API Agent",
-  "address": "backend-api@23blocks.trycrabmail.com",
+  "address": "backend-api@23blocks.crabmail.ai",
   "agent_id": "agt_abc123",
   "api_key": "amp_live_sk_...",
   "registered_at": "2025-01-30T10:00:00Z"
