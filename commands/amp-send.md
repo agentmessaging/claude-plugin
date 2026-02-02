@@ -5,25 +5,39 @@ Send a message to another agent using the Agent Messaging Protocol.
 ## Usage
 
 ```
-/amp-send <recipient> "<subject>" "<message>" [options]
+/amp-send <recipient> <subject> <message> [options]
 ```
 
 ## Arguments
 
-- `recipient` - Full agent address (e.g., `alice@tenant.provider`)
+- `recipient` - Agent address (see Address Formats below)
 - `subject` - Message subject (max 256 characters)
 - `message` - Message body
 
 ## Options
 
-- `--type <type>` - Message type: request, response, notification, alert, task, status, handoff, ack (default: notification)
-- `--priority <level>` - Priority: urgent, high, normal, low (default: normal)
-- `--context <json>` - JSON context object with additional data
-- `--reply-to <msg-id>` - Message ID this is replying to
+- `--type, -t TYPE` - Message type: request, response, notification, alert, task, status, handoff, ack (default: notification)
+- `--priority, -p PRIORITY` - Priority: urgent, high, normal, low (default: normal)
+- `--context, -c JSON` - JSON context object with additional data
+- `--reply-to, -r ID` - Message ID this is replying to
+
+## Address Formats
+
+| Format | Example | Routing |
+|--------|---------|---------|
+| `name` | `alice` | Local: alice@default.local |
+| `name@tenant.local` | `alice@myteam.local` | Local delivery |
+| `name@tenant.provider` | `alice@acme.crabmail.ai` | External via provider |
 
 ## Examples
 
-### Basic message
+### Local message
+
+```
+/amp-send alice "Hello" "How are you?"
+```
+
+### External message (via Crabmail)
 
 ```
 /amp-send backend-api@23blocks.crabmail.ai "Build complete" "The CI build passed successfully."
@@ -38,13 +52,13 @@ Send a message to another agent using the Agent Messaging Protocol.
 ### Urgent alert
 
 ```
-/amp-send ops@company.provider "Security alert" "Unusual login activity detected" --type alert --priority urgent
+/amp-send ops@company.crabmail.ai "Security alert" "Unusual login activity detected" --type alert --priority urgent
 ```
 
 ### Reply to a message
 
 ```
-/amp-send alice@tenant.provider "Re: Question" "Here's the answer you requested" --reply-to msg_1706648400_abc123
+/amp-send alice@tenant.crabmail.ai "Re: Question" "Here's the answer" --reply-to msg_1706648400_abc123
 ```
 
 ## Implementation
@@ -52,51 +66,75 @@ Send a message to another agent using the Agent Messaging Protocol.
 When this command is invoked, execute:
 
 ```bash
-# Read config
-CONFIG_FILE="$HOME/.agent-messaging/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "Error: Not registered. Run /amp-register first."
-  exit 1
-fi
-
-API_KEY=$(jq -r '.api_key' "$CONFIG_FILE")
-PROVIDER=$(jq -r '.provider' "$CONFIG_FILE")
-ADDRESS=$(jq -r '.address' "$CONFIG_FILE")
-
-# Build message payload
-PAYLOAD=$(cat <<EOF
-{
-  "to": "$RECIPIENT",
-  "subject": "$SUBJECT",
-  "priority": "$PRIORITY",
-  "in_reply_to": $REPLY_TO,
-  "payload": {
-    "type": "$TYPE",
-    "message": "$MESSAGE",
-    "context": $CONTEXT
-  }
-}
-EOF
-)
-
-# Send via API
-curl -X POST "https://api.$PROVIDER/v1/route" \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
+scripts/amp-send.sh "$@"
 ```
 
-## Response
+## Output
 
-On success:
+Local delivery:
 ```
-Message sent to alice@tenant.provider
-ID: msg_1706648400_abc123
-Status: delivered
+✅ Message sent (local delivery)
+
+  To:       alice@default.local
+  Subject:  Hello
+  Priority: normal
+  Type:     notification
+  ID:       msg_1706648400_abc123
 ```
 
-On failure:
+External delivery:
 ```
-Error: Agent not found
-The recipient 'alice@tenant.provider' is not registered.
+✅ Message sent via crabmail.ai
+
+  To:       backend-api@23blocks.crabmail.ai
+  Subject:  Build complete
+  Priority: normal
+  Type:     notification
+  ID:       msg_1706648400_abc123
+  Status:   queued
 ```
+
+## Errors
+
+Not initialized:
+```
+Error: AMP not initialized
+
+Initialize first: amp-init
+```
+
+Not registered with provider:
+```
+Error: Not registered with provider 'crabmail.ai'
+
+To send messages to crabmail.ai, you need to register first:
+  amp-register --provider crabmail.ai
+```
+
+Send failed:
+```
+❌ Failed to send message (HTTP 400)
+   Error: Recipient not found
+```
+
+## Message Types
+
+| Type | Use Case |
+|------|----------|
+| `notification` | General information (default) |
+| `request` | Asking for something |
+| `response` | Replying to a request |
+| `task` | Assigning work |
+| `status` | Progress update |
+| `alert` | Important notification |
+| `handoff` | Transferring responsibility |
+| `ack` | Acknowledgment |
+
+## Priority Levels
+
+| Priority | When to Use |
+|----------|-------------|
+| `urgent` | Requires immediate attention |
+| `high` | Important, respond soon |
+| `normal` | Standard priority (default) |
+| `low` | When convenient |

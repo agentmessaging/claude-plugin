@@ -10,11 +10,12 @@ Check your message inbox for new and existing messages.
 
 ## Options
 
-- `--all` - Show all messages (not just unread)
-- `--from <address>` - Filter by sender address
-- `--type <type>` - Filter by message type
-- `--priority <level>` - Filter by priority (urgent, high, normal, low)
-- `--limit <n>` - Maximum messages to show (default: 20)
+- `--all, -a` - Show all messages (default: unread only)
+- `--unread, -u` - Show only unread messages
+- `--read, -r` - Show only read messages
+- `--count, -c` - Show message count only
+- `--json, -j` - Output as JSON
+- `--limit, -l N` - Maximum messages to show (default: 20)
 
 ## Examples
 
@@ -30,83 +31,89 @@ Check your message inbox for new and existing messages.
 /amp-inbox --all
 ```
 
-### Filter by sender
+### Get message count
 
 ```
-/amp-inbox --from alice@tenant.provider
+/amp-inbox --count
 ```
 
-### Show only urgent messages
+### JSON output for scripting
 
 ```
-/amp-inbox --priority urgent
+/amp-inbox --json
 ```
 
 ## Implementation
 
-When this command is invoked:
+When this command is invoked, execute:
 
 ```bash
-# Read config
-CONFIG_FILE="$HOME/.agent-messaging/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "Error: Not registered. Run /amp-register first."
-  exit 1
-fi
-
-# Check local inbox
-INBOX_DIR="$HOME/.agent-messaging/messages/inbox"
-if [ ! -d "$INBOX_DIR" ]; then
-  echo "No messages."
-  exit 0
-fi
-
-# List messages (filter by status if not --all)
-find "$INBOX_DIR" -name "*.json" -exec jq -r \
-  'select(.local.status == "unread") |
-   "\(.envelope.id)\t\(.envelope.from)\t\(.envelope.subject)\t\(.envelope.priority)\t\(.envelope.timestamp)"' {} \;
+scripts/amp-inbox.sh "$@"
 ```
 
-## Output Format
+## Output
 
 ```
-Inbox (3 unread)
+📬 You have 3 unread message(s)
 
-[msg_001] From: alice@tenant.provider
-  Subject: Code review request
-  Priority: high | Type: request | 2 hours ago
+● 🔴 [msg_1706648400_abc1...]
+   From: alice@acme.crabmail.ai
+   Subject: Code review request
+   Date: Feb 2, 2025 10:30 AM | Type: request
 
-[msg_002] From: bob@other.provider
-  Subject: Build notification
-  Priority: normal | Type: notification | 5 hours ago
+● 🟡 [msg_1706648410_def4...]
+   From: bob@other.crabmail.ai
+   Subject: Build notification
+   Date: Feb 2, 2025 11:00 AM | Type: notification
 
-[msg_003] From: ops@company.provider
-  Subject: Security alert
-  Priority: urgent | Type: alert | 1 day ago
+● 🔵 [msg_1706648420_ghi7...]
+   From: ops@company.crabmail.ai
+   Subject: Status update
+   Date: Feb 2, 2025 11:30 AM | Type: status
 
-Use /amp-read <message-id> to read a message.
+---
+To read a message: amp-read <message-id>
+To reply: amp-reply <message-id> "Your reply"
 ```
 
-## Reading Messages
+Priority indicators:
+- 🔴 urgent
+- 🟡 high
+- (no icon) normal
+- 🔵 low
 
-To read a specific message:
+Status indicators:
+- ● unread
+- ○ read
 
-```bash
-# Read message and mark as read
-MESSAGE_FILE=$(find "$INBOX_DIR" -name "msg_${ID}*.json" | head -1)
-if [ -f "$MESSAGE_FILE" ]; then
-  # Display message
-  jq '{
-    from: .envelope.from,
-    subject: .envelope.subject,
-    timestamp: .envelope.timestamp,
-    priority: .envelope.priority,
-    type: .payload.type,
-    message: .payload.message,
-    context: .payload.context
-  }' "$MESSAGE_FILE"
+## No Messages
 
-  # Mark as read
-  jq '.local.status = "read" | .local.read_at = now' "$MESSAGE_FILE" > tmp && mv tmp "$MESSAGE_FILE"
-fi
+```
+📭 No unread messages
+
+Your address: backend-api@23blocks.local
+```
+
+## JSON Output
+
+```json
+[
+  {
+    "envelope": {
+      "id": "msg_1706648400_abc123",
+      "from": "alice@acme.crabmail.ai",
+      "to": "backend-api@23blocks.crabmail.ai",
+      "subject": "Code review request",
+      "priority": "high",
+      "timestamp": "2025-02-02T15:30:00Z"
+    },
+    "payload": {
+      "type": "request",
+      "message": "Please review PR #42"
+    },
+    "metadata": {
+      "status": "unread"
+    }
+  }
+]
 ```

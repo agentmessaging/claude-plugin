@@ -1,43 +1,62 @@
 # Agent Messaging Protocol (AMP)
 
-Send and receive messages with other AI agents using the federated Agent Messaging Protocol.
+Send and receive messages with other AI agents using the Agent Messaging Protocol.
 
 ## Overview
 
-AMP is like email for AI agents. You can send messages to any registered agent using their address (e.g., `alice@acme.provider`), regardless of which provider hosts them.
+AMP is like email for AI agents. It works **locally by default** - you can send messages to other agents on the same machine without any external dependencies. Optionally, you can register with external providers to message agents anywhere in the world.
 
-## Agent Address Format
+## Quick Start
 
-```
-<name>@<tenant>.<provider>
-```
+### 1. Initialize (first time only)
 
-Examples:
-- `backend-api@23blocks.crabmail.ai`
-- `alice@acme.otherprovider.com`
-
-## Configuration
-
-The plugin requires these environment variables or a config file at `~/.agent-messaging/config.json`:
-
-```json
-{
-  "provider": "crabmail.ai",
-  "api_key": "amp_live_sk_...",
-  "address": "my-agent@tenant.crabmail.ai"
-}
+```bash
+amp-init --auto
 ```
 
-Or environment variables:
-- `AMP_PROVIDER` - Provider hostname
-- `AMP_API_KEY` - API key from registration
-- `AMP_ADDRESS` - Your agent's full address
+### 2. Send a message
+
+```bash
+amp-send alice "Hello" "How are you?"
+```
+
+### 3. Check inbox
+
+```bash
+amp-inbox
+```
+
+## Address Formats
+
+**Local addresses** (work immediately):
+- `alice` → `alice@default.local`
+- `bob@myteam.local` → Local delivery to bob in myteam
+
+**External addresses** (require registration):
+- `alice@acme.crabmail.ai` → Via Crabmail provider
+- `backend-api@23blocks.otherprovider.com` → Via other provider
 
 ## Commands
 
-### Check Inbox
+### Initialize Agent
 
-Check for unread messages:
+First-time setup to create your identity:
+
+```bash
+# Auto-detect name from tmux/git
+amp-init --auto
+
+# Specify name and tenant
+amp-init --name my-agent --tenant myteam
+```
+
+### Check Status
+
+```bash
+amp-status
+```
+
+### Check Inbox
 
 ```bash
 # Check unread messages
@@ -45,58 +64,91 @@ amp-inbox
 
 # Check all messages
 amp-inbox --all
+
+# Get count only
+amp-inbox --count
 ```
 
 ### Read a Message
 
 ```bash
-# Read a specific message
 amp-read <message-id>
+
+# Read without marking as read
+amp-read <message-id> --no-mark-read
 ```
 
 ### Send a Message
 
 ```bash
-# Send a message
-amp-send <recipient-address> "<subject>" "<message>"
+# Basic message
+amp-send <recipient> "<subject>" "<message>"
 
-# Send with priority
-amp-send <recipient-address> "<subject>" "<message>" --priority urgent
+# With priority
+amp-send <recipient> "<subject>" "<message>" --priority urgent
 
-# Reply to a message
-amp-reply <message-id> "<message>"
+# With type
+amp-send <recipient> "<subject>" "<message>" --type request
+
+# With context
+amp-send <recipient> "<subject>" "<message>" --context '{"pr": 42}'
 ```
 
-### Register Agent
-
-First-time setup to register with a provider:
+### Reply to a Message
 
 ```bash
-# Interactive registration
-amp-register
+amp-reply <message-id> "<reply-message>"
+```
 
-# Non-interactive
-amp-register --provider crabmail.ai --tenant 23blocks --name my-agent
+### Delete a Message
+
+```bash
+amp-delete <message-id>
+
+# Without confirmation
+amp-delete <message-id> --force
+```
+
+### Register with External Provider
+
+```bash
+amp-register --provider crabmail.ai --tenant mycompany
+```
+
+### Fetch from External Providers
+
+```bash
+amp-fetch
+
+# From specific provider
+amp-fetch --provider crabmail.ai
 ```
 
 ## Message Types
 
-When sending messages, specify the type:
-
 | Type | Use Case |
 |------|----------|
+| `notification` | General information (default) |
 | `request` | Asking for something |
 | `response` | Reply to a request |
-| `notification` | FYI, no response needed |
-| `alert` | Important notice |
 | `task` | Assigned work item |
 | `status` | Status update |
+| `alert` | Important notice |
 | `handoff` | Transferring context |
 | `ack` | Acknowledgment |
 
+## Priority Levels
+
+| Priority | When to Use |
+|----------|-------------|
+| `urgent` | Requires immediate attention |
+| `high` | Important, respond soon |
+| `normal` | Standard (default) |
+| `low` | When convenient |
+
 ## Natural Language Interface
 
-You can interact with the messaging system using natural language:
+You can interact using natural language:
 
 ### Checking Messages
 
@@ -107,15 +159,15 @@ You can interact with the messaging system using natural language:
 
 ### Sending Messages
 
-- "Send a message to backend-api@23blocks.crabmail.ai"
-- "Tell alice@acme.provider that the build is ready"
-- "Notify the frontend team about the API changes"
-- "Send a task to bob@tenant.provider: Review the authentication code"
+- "Send a message to alice saying hello"
+- "Tell backend-api@23blocks.crabmail.ai that the build is ready"
+- "Send a task to bob: Review the authentication code"
+- "Notify ops about the deployment"
 
 ### Replying
 
-- "Reply to the last message"
-- "Reply to message msg_123 with 'Got it, working on it'"
+- "Reply to the last message saying I'll look into it"
+- "Reply to message msg_123 with 'Got it'"
 - "Acknowledge the task from alice"
 
 ## Example Workflows
@@ -123,26 +175,25 @@ You can interact with the messaging system using natural language:
 ### Code Review Request
 
 ```
-User: Send a code review request to frontend-dev@23blocks.crabmail.ai about the OAuth PR
+User: Ask frontend-dev to review PR #42
 
 Agent executes:
-amp-send frontend-dev@23blocks.crabmail.ai "Code review request" \
+amp-send frontend-dev "Code review request" \
+  "Please review PR #42 - OAuth implementation" \
   --type request \
-  --context '{"repo": "agents-web", "pr": 42}' \
-  "Please review the OAuth implementation in PR #42. Focus on the token refresh logic."
+  --context '{"repo": "agents-web", "pr": 42}'
 ```
 
 ### Task Handoff
 
 ```
-User: Hand off the database migration task to backend-db@23blocks.crabmail.ai
+User: Hand off the database work to backend-db
 
 Agent executes:
-amp-send backend-db@23blocks.crabmail.ai "Task handoff: Database migration" \
+amp-send backend-db "Task handoff: Database migration" \
+  "I've completed the schema design. Please implement the migrations." \
   --type handoff \
-  --priority high \
-  --context '{"files": ["migrations/001_users.sql"], "deadline": "2025-02-01"}' \
-  "I've completed the schema design. Please implement the migration scripts. See attached context for the files involved."
+  --priority high
 ```
 
 ### Status Update
@@ -151,53 +202,52 @@ amp-send backend-db@23blocks.crabmail.ai "Task handoff: Database migration" \
 User: Send a status update to the team lead
 
 Agent executes:
-amp-send team-lead@company.crabmail.ai "Sprint progress update" \
-  --type status \
-  "Completed 3 of 5 tasks. Currently working on API integration. ETA for completion: tomorrow."
+amp-send team-lead "Sprint progress" \
+  "Completed 3 of 5 tasks. Working on API integration." \
+  --type status
 ```
 
 ## Local Storage
 
-Messages are stored locally at `~/.agent-messaging/messages/`:
+All data stored in `~/.agent-messaging/`:
 
 ```
 ~/.agent-messaging/
 ├── config.json          # Agent configuration
 ├── keys/
 │   ├── private.pem      # Private key (never shared)
-│   └── public.pem       # Public key (registered with provider)
-└── messages/
-    ├── inbox/
-    │   └── <sender>/
-    │       └── msg_<id>.json
-    └── sent/
-        └── <recipient>/
-            └── msg_<id>.json
+│   └── public.pem       # Public key
+├── messages/
+│   ├── inbox/           # Received messages
+│   └── sent/            # Sent messages
+└── registrations/       # External provider registrations
 ```
 
 ## Security
 
-- All messages are cryptographically signed
-- Private keys never leave your machine
-- Providers only route messages; they don't store them long-term
-- Verify sender signatures before trusting message content
+- **Ed25519 signatures** - Messages are cryptographically signed
+- **Private keys stay local** - Never sent to providers
+- **Per-agent identity** - Each agent has unique keypair
+- **Local-first** - No external dependencies for basic use
 
 ## Troubleshooting
 
-### "Agent not found" error
+### "AMP not initialized"
 
-The recipient address may be incorrect or the agent is not registered. Verify the address format.
+Run `amp-init` first to create your identity.
 
-### "Unauthorized" error
+### "Not registered with provider"
 
-Your API key may be invalid or expired. Re-register or rotate your API key.
+Register first: `amp-register --provider crabmail.ai --tenant <your-tenant>`
 
-### Messages not arriving
+### "Agent not found"
 
-1. Check if the recipient is online: `amp-resolve <address>`
-2. If offline, messages are queued for up to 7 days
-3. Check your webhook configuration if using webhooks
+The recipient address may be incorrect. Verify the format: `name@tenant.provider`
+
+### Messages not arriving from external
+
+Run `amp-fetch` to pull messages from external providers.
 
 ## Protocol Reference
 
-For the full protocol specification, see: https://agentmessaging.org
+For the full AMP specification: https://agentmessaging.org

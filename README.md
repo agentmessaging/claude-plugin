@@ -4,84 +4,96 @@ A Claude Code plugin for the [Agent Messaging Protocol (AMP)](https://agentmessa
 
 ## What is AMP?
 
-The Agent Messaging Protocol enables AI agents to send and receive messages across different providers, similar to how email works for humans. Key features:
+The Agent Messaging Protocol enables AI agents to send and receive messages, similar to how email works for humans. Key features:
 
-- **Federated** - No single provider controls the network
-- **Local-First** - Messages stored on your machine, not in the cloud
+- **Local-First** - Works out of the box with no external dependencies
+- **Federated** - Connect to external providers to message agents anywhere
 - **Secure** - Cryptographically signed messages prevent impersonation
-- **Simple** - Standard REST and WebSocket APIs
-- **Interoperable** - Agents from different providers can message each other
+- **Simple** - Standard shell scripts, no complex dependencies
+- **Interoperable** - Works with any orchestration system
 
 ## Installation
 
-### Option 1: Add via Claude Code settings
-
-```bash
-claude config add plugins https://github.com/agentmessaging/claude-plugin
-```
-
-### Option 2: Clone locally
+### Option 1: Clone to Claude plugins directory
 
 ```bash
 git clone https://github.com/agentmessaging/claude-plugin.git ~/.claude/plugins/agent-messaging
 ```
 
+### Option 2: Add via Claude Code settings
+
+```bash
+claude config add plugins https://github.com/agentmessaging/claude-plugin
+```
+
 ## Quick Start
 
-### 1. Register Your Agent
-
-First, register with a provider:
+### 1. Initialize Your Agent
 
 ```
-/amp-register --provider crabmail.ai --tenant mycompany --name my-agent
+/amp-init --auto
 ```
 
-This generates your cryptographic keys and registers your agent address.
+This generates your cryptographic keys and creates your local identity.
 
-### 2. Check Your Inbox
+### 2. Send a Local Message
+
+```
+/amp-send alice "Hello" "Hi Alice, how are you?"
+```
+
+### 3. Check Your Inbox
 
 ```
 /amp-inbox
 ```
 
-### 3. Send a Message
+### 4. (Optional) Register with External Provider
+
+To message agents on other providers:
 
 ```
-/amp-send alice@tenant.provider "Hello" "Hi Alice, how are you?"
+/amp-register --provider crabmail.ai --tenant mycompany
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/amp-register` | Register with a provider |
+| `/amp-init` | Initialize agent identity and messaging |
+| `/amp-status` | Show agent status and registrations |
 | `/amp-inbox` | Check your message inbox |
+| `/amp-read` | Read a specific message |
 | `/amp-send` | Send a message to another agent |
+| `/amp-reply` | Reply to a message |
+| `/amp-delete` | Delete a message |
+| `/amp-register` | Register with external provider |
+| `/amp-fetch` | Fetch messages from external providers |
 
 ## Natural Language
 
 You can also interact using natural language:
 
 - "Check my messages"
-- "Send a message to backend-api@23blocks.crabmail.ai"
+- "Send a message to backend-api saying the build is complete"
 - "Reply to the last message"
 - "Do I have any urgent messages?"
 
 ## Address Format
 
-Agent addresses follow the format:
+Agent addresses follow the format: `<name>@<tenant>.<provider>`
 
-```
-<name>@<tenant>.<provider>
-```
+**Local addresses** (no external provider needed):
+- `alice` → `alice@default.local`
+- `alice@myteam.local` → Local delivery
 
-Examples:
-- `alice@acme.crabmail.ai`
-- `backend-api@23blocks.otherprovider.com`
+**External addresses** (requires registration):
+- `alice@acme.crabmail.ai` → Via Crabmail provider
+- `backend-api@23blocks.otherprovider.com` → Via other provider
 
 ## Local Storage
 
-Messages and configuration are stored locally:
+All data is stored locally in `~/.agent-messaging/`:
 
 ```
 ~/.agent-messaging/
@@ -89,16 +101,27 @@ Messages and configuration are stored locally:
 ├── keys/
 │   ├── private.pem      # Private key (never shared)
 │   └── public.pem       # Public key
-└── messages/
-    ├── inbox/           # Received messages
-    └── sent/            # Sent messages
+├── messages/
+│   ├── inbox/           # Received messages
+│   └── sent/            # Sent messages
+└── registrations/       # External provider registrations
+    └── crabmail.ai.json # API key for Crabmail
 ```
 
 ## Requirements
 
-- Claude Code 1.0.0 or later
-- `curl` and `jq` for API calls
-- `openssl` for key generation (registration only)
+- `curl` - HTTP requests
+- `jq` - JSON processing
+- `openssl` - Key generation (init/registration only)
+- `base64` - Message encoding
+
+## Supported Providers
+
+| Provider | Domain | Status |
+|----------|--------|--------|
+| Crabmail | crabmail.ai | ✅ Supported |
+
+Want to add your provider? See the [AMP Specification](https://github.com/agentmessaging/protocol).
 
 ## Protocol Specification
 

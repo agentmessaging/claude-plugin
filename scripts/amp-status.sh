@@ -1,0 +1,164 @@
+#!/bin/bash
+# =============================================================================
+# AMP Status - Show Agent Messaging Status
+# =============================================================================
+#
+# Display your AMP configuration and registration status.
+#
+# Usage:
+#   amp-status
+#   amp-status --json
+#
+# =============================================================================
+
+set -e
+
+# Source helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/amp-helper.sh"
+
+# Parse arguments
+JSON_OUTPUT=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --json|-j)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: amp-status [options]"
+            echo ""
+            echo "Show your AMP agent status and registrations."
+            echo ""
+            echo "Options:"
+            echo "  --json, -j      Output as JSON"
+            echo "  --help, -h      Show this help"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Check initialization
+if [ ! -f "${AMP_CONFIG}" ]; then
+    if [ "$JSON_OUTPUT" = true ]; then
+        echo '{"initialized": false}'
+    else
+        echo "AMP not initialized"
+        echo ""
+        echo "Run: amp-init"
+    fi
+    exit 0
+fi
+
+# Load configuration
+load_config
+
+# Inbox and sent directories
+AMP_INBOX_DIR="${AMP_MESSAGES_DIR}/inbox"
+AMP_SENT_DIR="${AMP_MESSAGES_DIR}/sent"
+
+# Count messages
+INBOX_COUNT=0
+UNREAD_COUNT=0
+SENT_COUNT=0
+
+if [ -d "$AMP_INBOX_DIR" ]; then
+    INBOX_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+    UNREAD_COUNT=$(grep -l '"status"[[:space:]]*:[[:space:]]*"unread"' "$AMP_INBOX_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
+fi
+
+if [ -d "$AMP_SENT_DIR" ]; then
+    SENT_COUNT=$(find "$AMP_SENT_DIR" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+fi
+
+# Get registrations
+REGISTRATIONS=()
+if [ -d "$AMP_REGISTRATIONS_DIR" ]; then
+    shopt -s nullglob
+    for reg_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
+        provider=$(basename "$reg_file" .json)
+        address=$(jq -r '.address' "$reg_file")
+        registered=$(jq -r '.registeredAt' "$reg_file")
+        REGISTRATIONS+=("{\"provider\":\"$provider\",\"address\":\"$address\",\"registeredAt\":\"$registered\"}")
+    done
+    shopt -u nullglob
+fi
+
+# JSON output
+if [ "$JSON_OUTPUT" = true ]; then
+    REGS_JSON="[]"
+    if [ ${#REGISTRATIONS[@]} -gt 0 ]; then
+        REGS_JSON=$(printf '%s\n' "${REGISTRATIONS[@]}" | jq -s '.')
+    fi
+
+    jq -n \
+        --arg name "$AMP_AGENT_NAME" \
+        --arg tenant "$AMP_TENANT" \
+        --arg address "$AMP_ADDRESS" \
+        --arg fingerprint "$AMP_FINGERPRINT" \
+        --arg configFile "$AMP_CONFIG" \
+        --argjson inbox "$INBOX_COUNT" \
+        --argjson unread "$UNREAD_COUNT" \
+        --argjson sent "$SENT_COUNT" \
+        --argjson registrations "$REGS_JSON" \
+        '{
+            initialized: true,
+            agent: {
+                name: $name,
+                tenant: $tenant,
+                address: $address,
+                fingerprint: $fingerprint
+            },
+            messages: {
+                inbox: $inbox,
+                unread: $unread,
+                sent: $sent
+            },
+            registrations: $registrations,
+            configFile: $configFile
+        }'
+    exit 0
+fi
+
+# Human-readable output
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "AMP Agent Status"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Identity:"
+echo "  Name:        ${AMP_AGENT_NAME}"
+echo "  Tenant:      ${AMP_TENANT}"
+echo "  Address:     ${AMP_ADDRESS}"
+echo "  Fingerprint: ${AMP_FINGERPRINT:0:16}..."
+echo ""
+echo "Messages:"
+echo "  Inbox:       ${INBOX_COUNT} (${UNREAD_COUNT} unread)"
+echo "  Sent:        ${SENT_COUNT}"
+echo ""
+
+if [ ${#REGISTRATIONS[@]} -gt 0 ]; then
+    echo "External Registrations:"
+    for reg_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
+        if [ -f "$reg_file" ]; then
+            provider=$(basename "$reg_file" .json)
+            address=$(jq -r '.address' "$reg_file")
+            registered=$(jq -r '.registeredAt' "$reg_file")
+            echo "  ${provider}:"
+            echo "    Address:    ${address}"
+            echo "    Registered: ${registered}"
+        fi
+    done
+    echo ""
+else
+    echo "External Registrations: None"
+    echo "  Register with: amp-register --provider crabmail.ai --tenant <tenant>"
+    echo ""
+fi
+
+echo "Storage: ${AMP_DIR}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,98 @@
+{
+  "name": "agent-messaging",
+  "displayName": "Agent Messaging Protocol",
+  "description": "Send and receive messages between AI agents using AMP - email for AI agents",
+  "version": "0.1.0",
+  "author": "23blocks",
+  "license": "Apache-2.0",
+  "homepage": "https://agentmessaging.org",
+  "repository": "https://github.com/agentmessaging/claude-plugin",
+  "keywords": [
+    "messaging",
+    "agent",
+    "communication",
+    "AMP",
+    "federation"
+  ],
+  "requirements": {
+    "tools": ["curl", "jq", "openssl"]
+  },
+  "commands": [
+    {
+      "name": "amp-init",
+      "description": "Initialize your agent identity and messaging",
+      "script": "scripts/amp-init.sh",
+      "usage": "amp-init [--name <name>] [--tenant <tenant>] [--auto]"
+    },
+    {
+      "name": "amp-status",
+      "description": "Show your agent messaging status and registrations",
+      "script": "scripts/amp-status.sh",
+      "usage": "amp-status [--json]"
+    },
+    {
+      "name": "amp-inbox",
+      "description": "Check your message inbox",
+      "script": "scripts/amp-inbox.sh",
+      "usage": "amp-inbox [--all] [--count] [--json]"
+    },
+    {
+      "name": "amp-read",
+      "description": "Read a specific message",
+      "script": "scripts/amp-read.sh",
+      "usage": "amp-read <message-id> [--no-mark-read] [--json]"
+    },
+    {
+      "name": "amp-send",
+      "description": "Send a message to another agent",
+      "script": "scripts/amp-send.sh",
+      "usage": "amp-send <recipient> <subject> <message> [options]"
+    },
+    {
+      "name": "amp-reply",
+      "description": "Reply to a message in your inbox",
+      "script": "scripts/amp-reply.sh",
+      "usage": "amp-reply <message-id> <reply-message> [options]"
+    },
+    {
+      "name": "amp-delete",
+      "description": "Delete a message",
+      "script": "scripts/amp-delete.sh",
+      "usage": "amp-delete <message-id> [--sent] [--force]"
+    },
+    {
+      "name": "amp-register",
+      "description": "Register with an external AMP provider",
+      "script": "scripts/amp-register.sh",
+      "usage": "amp-register --provider <provider> --tenant <tenant> [--name <name>]"
+    },
+    {
+      "name": "amp-fetch",
+      "description": "Fetch new messages from external providers",
+      "script": "scripts/amp-fetch.sh",
+      "usage": "amp-fetch [--provider <provider>] [--verbose]"
+    }
+  ],
+  "skills": [
+    {
+      "name": "agent-messaging",
+      "file": "skills/agent-messaging/SKILL.md",
+      "triggers": [
+        "check my messages",
+        "send a message",
+        "reply to",
+        "read message",
+        "inbox",
+        "message from"
+      ]
+    }
+  ],
+  "storage": {
+    "baseDir": "~/.agent-messaging",
+    "config": "config.json",
+    "keys": "keys/",
+    "inbox": "messages/inbox/",
+    "sent": "messages/sent/",
+    "registrations": "registrations/"
+  }
+}

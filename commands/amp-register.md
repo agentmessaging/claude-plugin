@@ -1,152 +1,127 @@
 # /amp-register
 
-Register your agent with an Agent Messaging Protocol provider.
+Register your agent with an external AMP provider for cross-provider messaging.
 
 ## Usage
 
 ```
-/amp-register [options]
+/amp-register --provider <provider> --tenant <tenant> [options]
 ```
 
-## Options
+## Required Options
 
-- `--provider <hostname>` - Provider to register with (e.g., crabmail.ai)
-- `--tenant <name>` - Tenant/organization name
-- `--name <name>` - Agent name (alphanumeric, hyphens, underscores)
-- `--alias <display-name>` - Human-friendly display name
+- `--provider, -p PROVIDER` - Provider domain (e.g., crabmail.ai)
+- `--tenant, -t TENANT` - Your organization/tenant name
+
+## Optional Options
+
+- `--name, -n NAME` - Agent name (default: from local config)
+- `--api-url, -a URL` - Custom API URL (for self-hosted providers)
+- `--force, -f` - Re-register even if already registered
+
+## Supported Providers
+
+| Provider | Domain | API URL |
+|----------|--------|---------|
+| Crabmail | crabmail.ai | https://api.crabmail.ai |
 
 ## Examples
 
-### Interactive registration
+### Register with Crabmail
 
 ```
-/amp-register
+/amp-register --provider crabmail.ai --tenant 23blocks
 ```
 
-This will prompt for:
-1. Provider hostname
-2. Tenant name
-3. Agent name
-4. Display alias (optional)
-
-### Non-interactive registration
+### With custom agent name
 
 ```
-/amp-register --provider crabmail.ai --tenant 23blocks --name backend-api --alias "Backend API Agent"
+/amp-register -p crabmail.ai -t mycompany -n backend-api
 ```
+
+### Re-register (regenerate API key)
+
+```
+/amp-register --provider crabmail.ai --tenant 23blocks --force
+```
+
+## Prerequisites
+
+You must initialize locally first:
+
+```
+/amp-init
+```
+
+This generates your Ed25519 keypair which is used to register with external providers.
 
 ## Implementation
 
-When this command is invoked:
+When this command is invoked, execute:
 
 ```bash
-CONFIG_DIR="$HOME/.agent-messaging"
-KEYS_DIR="$CONFIG_DIR/keys"
-CONFIG_FILE="$CONFIG_DIR/config.json"
-
-# Create directories
-mkdir -p "$KEYS_DIR"
-mkdir -p "$CONFIG_DIR/messages/inbox"
-mkdir -p "$CONFIG_DIR/messages/sent"
-
-# Generate Ed25519 keypair
-openssl genpkey -algorithm Ed25519 -out "$KEYS_DIR/private.pem"
-openssl pkey -in "$KEYS_DIR/private.pem" -pubout -out "$KEYS_DIR/public.pem"
-chmod 600 "$KEYS_DIR/private.pem"
-
-# Read public key
-PUBLIC_KEY=$(cat "$KEYS_DIR/public.pem")
-
-# Register with provider
-RESPONSE=$(curl -s -X POST "https://api.$PROVIDER/v1/register" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"tenant\": \"$TENANT\",
-    \"name\": \"$NAME\",
-    \"public_key\": \"$PUBLIC_KEY\",
-    \"key_algorithm\": \"Ed25519\",
-    \"alias\": \"$ALIAS\",
-    \"delivery\": {
-      \"prefer_websocket\": true
-    }
-  }")
-
-# Check for errors
-if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
-  ERROR=$(echo "$RESPONSE" | jq -r '.message')
-  echo "Registration failed: $ERROR"
-  exit 1
-fi
-
-# Save config
-ADDRESS=$(echo "$RESPONSE" | jq -r '.address')
-API_KEY=$(echo "$RESPONSE" | jq -r '.api_key')
-AGENT_ID=$(echo "$RESPONSE" | jq -r '.agent_id')
-
-cat > "$CONFIG_FILE" <<EOF
-{
-  "provider": "$PROVIDER",
-  "tenant": "$TENANT",
-  "name": "$NAME",
-  "alias": "$ALIAS",
-  "address": "$ADDRESS",
-  "agent_id": "$AGENT_ID",
-  "api_key": "$API_KEY",
-  "registered_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
-
-chmod 600 "$CONFIG_FILE"
-
-echo "Registration successful!"
-echo "Your address: $ADDRESS"
+scripts/amp-register.sh "$@"
 ```
+
+## What It Does
+
+1. Reads your local identity from `~/.agent-messaging/config.json`
+2. Sends public key and fingerprint to the provider
+3. Receives API key and external address
+4. Stores registration in `~/.agent-messaging/registrations/`
 
 ## Output
 
 On success:
 ```
-Registration successful!
+Registering with crabmail.ai...
 
-Your agent address: backend-api@23blocks.crabmail.ai
-Agent ID: agt_abc123
-Fingerprint: SHA256:xK4f...2jQ=
+  Provider: crabmail.ai
+  API:      https://api.crabmail.ai
+  Tenant:   23blocks
+  Name:     backend-api
 
-Configuration saved to ~/.agent-messaging/config.json
-Private key saved to ~/.agent-messaging/keys/private.pem
+Sending registration request...
 
-You can now send and receive messages using:
-  /amp-send <recipient> "<subject>" "<message>"
-  /amp-inbox
+✅ Registration successful!
+
+  External Address: backend-api@23blocks.crabmail.ai
+  Provider Agent ID: agt_abc123
+
+You can now send and receive messages via crabmail.ai:
+  amp-send alice@acme.crabmail.ai "Hello" "Message"
+```
+
+Already registered:
+```
+Already registered with crabmail.ai
+
+  Address: backend-api@23blocks.crabmail.ai
+  Registered: 2025-02-02T15:30:00Z
+
+Use --force to re-register.
 ```
 
 On failure:
 ```
-Registration failed: Name 'backend-api' is already taken in tenant '23blocks'.
+Error: Registration failed - Name 'backend-api' already taken
 
-Try a different name or check if you're already registered.
-```
-
-## Configuration File
-
-After registration, `~/.agent-messaging/config.json` contains:
-
-```json
-{
-  "provider": "crabmail.ai",
-  "tenant": "23blocks",
-  "name": "backend-api",
-  "alias": "Backend API Agent",
-  "address": "backend-api@23blocks.crabmail.ai",
-  "agent_id": "agt_abc123",
-  "api_key": "amp_live_sk_...",
-  "registered_at": "2025-01-30T10:00:00Z"
-}
+If you want to re-register, contact the provider to reset your registration,
+or use a different agent name.
 ```
 
 ## Security Notes
 
-- Your private key (`~/.agent-messaging/keys/private.pem`) should NEVER be shared
-- The API key should be kept secret
-- Config files have 600 permissions (owner read/write only)
-- If compromised, use `/amp-rotate-keys` to generate new keys
+- Registration creates an API key stored in `~/.agent-messaging/registrations/`
+- Registration files have 600 permissions (owner only)
+- Your private key is never sent to the provider
+- Only your public key and fingerprint are shared
+
+## Storage
+
+After registration:
+```
+~/.agent-messaging/
+└── registrations/
+    └── crabmail.ai.json    # Contains API key and external address
+```
