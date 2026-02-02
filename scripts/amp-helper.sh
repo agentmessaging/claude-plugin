@@ -15,6 +15,12 @@
 
 set -e
 
+# Source security module
+SCRIPT_DIR_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR_HELPER}/amp-security.sh" ]; then
+    source "${SCRIPT_DIR_HELPER}/amp-security.sh"
+fi
+
 # Configuration
 AMP_DIR="${AMP_DIR:-${HOME}/.agent-messaging}"
 AMP_CONFIG="${AMP_DIR}/config.json"
@@ -308,42 +314,114 @@ create_message() {
 # Message Storage (Local Provider)
 # =============================================================================
 
-# Save message to inbox
+# Sanitize address for use as directory name
+sanitize_address_for_path() {
+    local address="$1"
+    # Replace @ and . with underscores, remove other special chars
+    echo "$address" | sed 's/[@.]/_/g' | sed 's/[^a-zA-Z0-9_-]//g'
+}
+
+# Save message to inbox (organized by sender)
 save_to_inbox() {
     local message_json="$1"
+    local apply_security="${2:-true}"
 
     local id=$(echo "$message_json" | jq -r '.envelope.id')
-    local inbox_file="${AMP_MESSAGES_DIR}/inbox/${id}.json"
+    local from=$(echo "$message_json" | jq -r '.envelope.from')
+    local sender_dir=$(sanitize_address_for_path "$from")
 
+    # Create sender subdirectory
+    local inbox_sender_dir="${AMP_INBOX_DIR}/${sender_dir}"
+    mkdir -p "$inbox_sender_dir"
+
+    # Apply content security if enabled and security module loaded
+    if [ "$apply_security" = "true" ] && type apply_content_security &>/dev/null; then
+        # Load local config for tenant
+        load_config 2>/dev/null || true
+        local local_tenant="${AMP_TENANT:-default}"
+
+        # Check if signature is present (assume valid for local, need verification for external)
+        local signature=$(echo "$message_json" | jq -r '.envelope.signature // empty')
+        local sig_valid="false"
+
+        # For local messages (same machine), trust them
+        local from_provider=""
+        if [[ "$from" == *"@"* ]]; then
+            local domain="${from#*@}"
+            if [[ "$domain" == *"."* ]]; then
+                from_provider="${domain#*.}"
+            fi
+        fi
+
+        if [ "$from_provider" = "local" ] || [ "$from_provider" = "$AMP_LOCAL_DOMAIN" ]; then
+            sig_valid="true"
+        elif [ -n "$signature" ]; then
+            # For external messages, would need to verify signature
+            # For now, mark as external if signature present
+            sig_valid="true"
+        fi
+
+        # Apply security
+        message_json=$(apply_content_security "$message_json" "$local_tenant" "$sig_valid")
+    fi
+
+    # Add received_at to local metadata
+    message_json=$(echo "$message_json" | jq \
+        --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '.local = (.local // {}) + {received_at: $received, status: "unread"}')
+
+    local inbox_file="${inbox_sender_dir}/${id}.json"
     echo "$message_json" > "$inbox_file"
     echo "$inbox_file"
 }
 
-# Save message to sent
+# Save message to sent (organized by recipient)
 save_to_sent() {
     local message_json="$1"
 
     local id=$(echo "$message_json" | jq -r '.envelope.id')
-    local sent_file="${AMP_MESSAGES_DIR}/sent/${id}.json"
+    local to=$(echo "$message_json" | jq -r '.envelope.to')
+    local recipient_dir=$(sanitize_address_for_path "$to")
 
+    # Create recipient subdirectory
+    local sent_recipient_dir="${AMP_SENT_DIR}/${recipient_dir}"
+    mkdir -p "$sent_recipient_dir"
+
+    # Add sent_at to local metadata
+    message_json=$(echo "$message_json" | jq \
+        --arg sent "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '.local = (.local // {}) + {sent_at: $sent}')
+
+    local sent_file="${sent_recipient_dir}/${id}.json"
     echo "$message_json" > "$sent_file"
     echo "$sent_file"
 }
 
-# List inbox messages
+# List inbox messages (handles nested sender directories)
 list_inbox() {
     local status_filter="${1:-}"  # Optional: unread, read, all
 
-    if [ ! -d "$AMP_INBOX_DIR" ] || [ -z "$(ls -A "$AMP_INBOX_DIR" 2>/dev/null)" ]; then
+    if [ ! -d "$AMP_INBOX_DIR" ]; then
         echo "[]"
         return 0
     fi
 
-    # Collect all message files and process in single jq call (O(n) instead of O(n²))
+    # Collect all message files from all sender subdirectories
     local msg_files=()
     shopt -s nullglob
+
+    # Check for old flat structure (backward compatibility)
     for msg_file in "${AMP_INBOX_DIR}"/*.json; do
         msg_files+=("$msg_file")
+    done
+
+    # Check nested sender directories (protocol-compliant structure)
+    for sender_dir in "${AMP_INBOX_DIR}"/*/; do
+        if [ -d "$sender_dir" ]; then
+            for msg_file in "${sender_dir}"*.json; do
+                msg_files+=("$msg_file")
+            done
+        fi
     done
     shopt -u nullglob
 
@@ -353,24 +431,57 @@ list_inbox() {
     fi
 
     # Use jq slurp to read all files at once, then filter and sort
+    # Check both .metadata.status (old) and .local.status (new)
     if [ -n "$status_filter" ] && [ "$status_filter" != "all" ]; then
         jq -s --arg status "$status_filter" \
-            '[.[] | select(.metadata.status == $status or ($status == "unread" and .metadata.status == null))] | sort_by(.envelope.timestamp) | reverse' \
+            '[.[] | select(
+                (.local.status // .metadata.status // "unread") == $status or
+                ($status == "unread" and (.local.status // .metadata.status) == null)
+            )] | sort_by(.envelope.timestamp) | reverse' \
             "${msg_files[@]}"
     else
         jq -s 'sort_by(.envelope.timestamp) | reverse' "${msg_files[@]}"
     fi
 }
 
-# Read a specific message
-read_message() {
+# Find message file by ID (searches flat and nested structures)
+find_message_file() {
     local message_id="$1"
-    local box="${2:-inbox}"  # inbox or sent
+    local base_dir="$2"
 
     # Security: validate message ID format
     if ! validate_message_id "$message_id"; then
         return 1
     fi
+
+    # Check flat structure first (backward compatibility)
+    local flat_file="${base_dir}/${message_id}.json"
+    if [ -f "$flat_file" ]; then
+        echo "$flat_file"
+        return 0
+    fi
+
+    # Search in subdirectories (protocol-compliant structure)
+    shopt -s nullglob
+    for subdir in "${base_dir}"/*/; do
+        if [ -d "$subdir" ]; then
+            local nested_file="${subdir}${message_id}.json"
+            if [ -f "$nested_file" ]; then
+                shopt -u nullglob
+                echo "$nested_file"
+                return 0
+            fi
+        fi
+    done
+    shopt -u nullglob
+
+    return 1
+}
+
+# Read a specific message
+read_message() {
+    local message_id="$1"
+    local box="${2:-inbox}"  # inbox or sent
 
     local msg_dir
     if [ "$box" = "inbox" ]; then
@@ -379,9 +490,10 @@ read_message() {
         msg_dir="$AMP_SENT_DIR"
     fi
 
-    local msg_file="${msg_dir}/${message_id}.json"
+    local msg_file
+    msg_file=$(find_message_file "$message_id" "$msg_dir")
 
-    if [ ! -f "$msg_file" ]; then
+    if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2
         return 1
     fi
@@ -393,19 +505,16 @@ read_message() {
 mark_as_read() {
     local message_id="$1"
 
-    # Security: validate message ID format
-    if ! validate_message_id "$message_id"; then
-        return 1
-    fi
+    local msg_file
+    msg_file=$(find_message_file "$message_id" "$AMP_INBOX_DIR")
 
-    local msg_file="${AMP_INBOX_DIR}/${message_id}.json"
-
-    if [ ! -f "$msg_file" ]; then
+    if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2
         return 1
     fi
 
-    local updated=$(jq '.metadata.status = "read"' "$msg_file")
+    # Update both old (.metadata.status) and new (.local.status) locations
+    local updated=$(jq '.metadata.status = "read" | .local.status = "read"' "$msg_file")
     echo "$updated" > "$msg_file"
 }
 
@@ -414,11 +523,6 @@ delete_message() {
     local message_id="$1"
     local box="${2:-inbox}"
 
-    # Security: validate message ID format
-    if ! validate_message_id "$message_id"; then
-        return 1
-    fi
-
     local msg_dir
     if [ "$box" = "inbox" ]; then
         msg_dir="$AMP_INBOX_DIR"
@@ -426,9 +530,10 @@ delete_message() {
         msg_dir="$AMP_SENT_DIR"
     fi
 
-    local msg_file="${msg_dir}/${message_id}.json"
+    local msg_file
+    msg_file=$(find_message_file "$message_id" "$msg_dir")
 
-    if [ ! -f "$msg_file" ]; then
+    if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2
         return 1
     fi

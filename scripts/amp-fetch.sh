@@ -161,20 +161,38 @@ for provider in "${PROVIDERS[@]}"; do
                 continue
             fi
 
-            # Add metadata
+            # Apply content security (external messages are always "external" trust level)
+            # Check if signature is present
+            local signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
+            local sig_valid="false"
+            if [ -n "$signature" ]; then
+                # TODO: Verify signature against sender's public key
+                sig_valid="true"
+            fi
+
+            # Apply security module if available
+            if type apply_content_security &>/dev/null; then
+                load_config 2>/dev/null || true
+                msg=$(apply_content_security "$msg" "${AMP_TENANT:-default}" "$sig_valid")
+            fi
+
+            # Add additional metadata
             msg=$(echo "$msg" | jq \
                 --arg receivedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                 --arg provider "$provider" \
-                '. + {
-                    metadata: (.metadata // {}) + {
-                        status: "unread",
-                        receivedAt: $receivedAt,
-                        fetchedFrom: $provider
-                    }
+                --arg method "fetch" \
+                '.local = (.local // {}) + {
+                    received_at: $receivedAt,
+                    fetched_from: $provider,
+                    delivery_method: $method,
+                    status: "unread"
                 }')
 
-            # Save to inbox
-            echo "$msg" > "${AMP_INBOX_DIR}/${msg_id}.json"
+            # Save to inbox (use sender subdirectory)
+            local from_addr=$(echo "$msg" | jq -r '.envelope.from')
+            local sender_dir=$(sanitize_address_for_path "$from_addr")
+            mkdir -p "${AMP_INBOX_DIR}/${sender_dir}"
+            echo "$msg" > "${AMP_INBOX_DIR}/${sender_dir}/${msg_id}.json"
 
             if [ "$VERBOSE" = true ]; then
                 subject=$(echo "$msg" | jq -r '.envelope.subject')

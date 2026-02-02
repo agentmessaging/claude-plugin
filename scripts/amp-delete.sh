@@ -90,14 +90,14 @@ fi
 # Require initialization
 require_init
 
-# Find the message file
+# Find the message file (searches flat and nested structures)
 if [ "$BOX" = "inbox" ]; then
-    MSG_FILE="${AMP_INBOX_DIR}/${MESSAGE_ID}.json"
+    MSG_FILE=$(find_message_file "$MESSAGE_ID" "$AMP_INBOX_DIR")
 else
-    MSG_FILE="${AMP_SENT_DIR}/${MESSAGE_ID}.json"
+    MSG_FILE=$(find_message_file "$MESSAGE_ID" "$AMP_SENT_DIR")
 fi
 
-if [ ! -f "$MSG_FILE" ]; then
+if [ -z "$MSG_FILE" ] || [ ! -f "$MSG_FILE" ]; then
     echo "Error: Message not found: ${MESSAGE_ID}"
     echo ""
     echo "Check the message ID and folder (inbox/sent)."

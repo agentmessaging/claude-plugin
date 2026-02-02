@@ -58,18 +58,21 @@ fi
 # Load configuration
 load_config
 
-# Count messages
+# Count messages (handles both flat and nested directory structures)
 INBOX_COUNT=0
 UNREAD_COUNT=0
 SENT_COUNT=0
 
 if [ -d "$AMP_INBOX_DIR" ]; then
-    INBOX_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
-    UNREAD_COUNT=$(grep -l '"status"[[:space:]]*:[[:space:]]*"unread"' "$AMP_INBOX_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
+    # Count all .json files recursively (handles nested sender directories)
+    INBOX_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
+    # Count unread messages - check both .local.status and .metadata.status
+    UNREAD_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" -type f -exec grep -l '"status"[[:space:]]*:[[:space:]]*"unread"' {} \; 2>/dev/null | wc -l | tr -d ' ')
 fi
 
 if [ -d "$AMP_SENT_DIR" ]; then
-    SENT_COUNT=$(find "$AMP_SENT_DIR" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+    # Count all .json files recursively (handles nested recipient directories)
+    SENT_COUNT=$(find "$AMP_SENT_DIR" -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
 fi
 
 # Get registrations
@@ -92,6 +95,14 @@ if [ "$JSON_OUTPUT" = true ]; then
         REGS_JSON=$(printf '%s\n' "${REGISTRATIONS[@]}" | jq -s '.')
     fi
 
+    # Check security module status
+    SECURITY_LOADED=false
+    PATTERN_COUNT=0
+    if type apply_content_security &>/dev/null; then
+        SECURITY_LOADED=true
+        PATTERN_COUNT=${#INJECTION_PATTERNS[@]}
+    fi
+
     jq -n \
         --arg name "$AMP_AGENT_NAME" \
         --arg tenant "$AMP_TENANT" \
@@ -102,6 +113,8 @@ if [ "$JSON_OUTPUT" = true ]; then
         --argjson unread "$UNREAD_COUNT" \
         --argjson sent "$SENT_COUNT" \
         --argjson registrations "$REGS_JSON" \
+        --argjson securityLoaded "$SECURITY_LOADED" \
+        --argjson patternCount "$PATTERN_COUNT" \
         '{
             initialized: true,
             agent: {
@@ -114,6 +127,11 @@ if [ "$JSON_OUTPUT" = true ]; then
                 inbox: $inbox,
                 unread: $unread,
                 sent: $sent
+            },
+            security: {
+                moduleLoaded: $securityLoaded,
+                contentWrapping: $securityLoaded,
+                injectionPatterns: $patternCount
             },
             registrations: $registrations,
             configFile: $configFile
@@ -156,5 +174,17 @@ else
     echo ""
 fi
 
+# Security status
+SECURITY_LOADED="No"
+if type apply_content_security &>/dev/null; then
+    SECURITY_LOADED="Yes"
+fi
+echo "Security:"
+echo "  Module loaded: ${SECURITY_LOADED}"
+if [ "$SECURITY_LOADED" = "Yes" ]; then
+    echo "  Content wrapping: Enabled for external messages"
+    echo "  Injection detection: ${#INJECTION_PATTERNS[@]} patterns"
+fi
+echo ""
 echo "Storage: ${AMP_DIR}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
