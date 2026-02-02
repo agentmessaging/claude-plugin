@@ -58,10 +58,6 @@ fi
 # Load configuration
 load_config
 
-# Inbox and sent directories
-AMP_INBOX_DIR="${AMP_MESSAGES_DIR}/inbox"
-AMP_SENT_DIR="${AMP_MESSAGES_DIR}/sent"
-
 # Count messages
 INBOX_COUNT=0
 UNREAD_COUNT=0
@@ -143,16 +139,16 @@ echo ""
 
 if [ ${#REGISTRATIONS[@]} -gt 0 ]; then
     echo "External Registrations:"
+    shopt -s nullglob
     for reg_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
-        if [ -f "$reg_file" ]; then
-            provider=$(basename "$reg_file" .json)
-            address=$(jq -r '.address' "$reg_file")
-            registered=$(jq -r '.registeredAt' "$reg_file")
-            echo "  ${provider}:"
-            echo "    Address:    ${address}"
-            echo "    Registered: ${registered}"
-        fi
+        provider=$(basename "$reg_file" .json)
+        address=$(jq -r '.address' "$reg_file")
+        registered=$(jq -r '.registeredAt' "$reg_file")
+        echo "  ${provider}:"
+        echo "    Address:    ${address}"
+        echo "    Registered: ${registered}"
     done
+    shopt -u nullglob
     echo ""
 else
     echo "External Registrations: None"

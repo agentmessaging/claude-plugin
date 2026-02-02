@@ -20,6 +20,8 @@ AMP_DIR="${AMP_DIR:-${HOME}/.agent-messaging}"
 AMP_CONFIG="${AMP_DIR}/config.json"
 AMP_KEYS_DIR="${AMP_DIR}/keys"
 AMP_MESSAGES_DIR="${AMP_DIR}/messages"
+AMP_INBOX_DIR="${AMP_MESSAGES_DIR}/inbox"
+AMP_SENT_DIR="${AMP_MESSAGES_DIR}/sent"
 AMP_REGISTRATIONS_DIR="${AMP_DIR}/registrations"
 
 # Default local provider
@@ -223,6 +225,18 @@ generate_message_id() {
     echo "msg_${timestamp}_${random}"
 }
 
+# Validate message ID format (security: prevent path traversal)
+validate_message_id() {
+    local id="$1"
+    # Message IDs must match: msg_<timestamp>_<hex>
+    # Only allow alphanumeric, underscores - no slashes, dots, etc.
+    if [[ ! "$id" =~ ^msg_[0-9]+_[a-f0-9]+$ ]]; then
+        echo "Error: Invalid message ID format: ${id}" >&2
+        return 1
+    fi
+    return 0
+}
+
 # Create AMP message envelope
 create_message() {
     local to="$1"
@@ -320,33 +334,32 @@ save_to_sent() {
 list_inbox() {
     local status_filter="${1:-}"  # Optional: unread, read, all
 
-    local inbox_dir="${AMP_MESSAGES_DIR}/inbox"
-
-    if [ ! -d "$inbox_dir" ] || [ -z "$(ls -A "$inbox_dir" 2>/dev/null)" ]; then
+    if [ ! -d "$AMP_INBOX_DIR" ] || [ -z "$(ls -A "$AMP_INBOX_DIR" 2>/dev/null)" ]; then
         echo "[]"
         return 0
     fi
 
-    local messages="[]"
-
-    for msg_file in "${inbox_dir}"/*.json; do
-        [ -f "$msg_file" ] || continue
-
-        local msg_status=$(jq -r '.metadata.status // "unread"' "$msg_file" 2>/dev/null)
-
-        # Apply filter
-        if [ -n "$status_filter" ] && [ "$status_filter" != "all" ]; then
-            if [ "$msg_status" != "$status_filter" ]; then
-                continue
-            fi
-        fi
-
-        # Add to array
-        messages=$(echo "$messages" | jq --slurpfile msg "$msg_file" '. + $msg')
+    # Collect all message files and process in single jq call (O(n) instead of O(n²))
+    local msg_files=()
+    shopt -s nullglob
+    for msg_file in "${AMP_INBOX_DIR}"/*.json; do
+        msg_files+=("$msg_file")
     done
+    shopt -u nullglob
 
-    # Sort by timestamp (newest first)
-    echo "$messages" | jq 'sort_by(.envelope.timestamp) | reverse'
+    if [ ${#msg_files[@]} -eq 0 ]; then
+        echo "[]"
+        return 0
+    fi
+
+    # Use jq slurp to read all files at once, then filter and sort
+    if [ -n "$status_filter" ] && [ "$status_filter" != "all" ]; then
+        jq -s --arg status "$status_filter" \
+            '[.[] | select(.metadata.status == $status or ($status == "unread" and .metadata.status == null))] | sort_by(.envelope.timestamp) | reverse' \
+            "${msg_files[@]}"
+    else
+        jq -s 'sort_by(.envelope.timestamp) | reverse' "${msg_files[@]}"
+    fi
 }
 
 # Read a specific message
@@ -354,7 +367,19 @@ read_message() {
     local message_id="$1"
     local box="${2:-inbox}"  # inbox or sent
 
-    local msg_file="${AMP_MESSAGES_DIR}/${box}/${message_id}.json"
+    # Security: validate message ID format
+    if ! validate_message_id "$message_id"; then
+        return 1
+    fi
+
+    local msg_dir
+    if [ "$box" = "inbox" ]; then
+        msg_dir="$AMP_INBOX_DIR"
+    else
+        msg_dir="$AMP_SENT_DIR"
+    fi
+
+    local msg_file="${msg_dir}/${message_id}.json"
 
     if [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2
@@ -368,7 +393,12 @@ read_message() {
 mark_as_read() {
     local message_id="$1"
 
-    local msg_file="${AMP_MESSAGES_DIR}/inbox/${message_id}.json"
+    # Security: validate message ID format
+    if ! validate_message_id "$message_id"; then
+        return 1
+    fi
+
+    local msg_file="${AMP_INBOX_DIR}/${message_id}.json"
 
     if [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2
@@ -384,7 +414,19 @@ delete_message() {
     local message_id="$1"
     local box="${2:-inbox}"
 
-    local msg_file="${AMP_MESSAGES_DIR}/${box}/${message_id}.json"
+    # Security: validate message ID format
+    if ! validate_message_id "$message_id"; then
+        return 1
+    fi
+
+    local msg_dir
+    if [ "$box" = "inbox" ]; then
+        msg_dir="$AMP_INBOX_DIR"
+    else
+        msg_dir="$AMP_SENT_DIR"
+    fi
+
+    local msg_file="${msg_dir}/${message_id}.json"
 
     if [ ! -f "$msg_file" ]; then
         echo "Error: Message not found: ${message_id}" >&2

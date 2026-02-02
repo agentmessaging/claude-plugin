@@ -82,6 +82,11 @@ if [ -z "$MESSAGE_ID" ]; then
     exit 1
 fi
 
+# Security: validate message ID format (prevent path traversal)
+if ! validate_message_id "$MESSAGE_ID"; then
+    exit 1
+fi
+
 # Require initialization
 require_init
 

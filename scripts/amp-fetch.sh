@@ -140,10 +140,18 @@ for provider in "${PROVIDERS[@]}"; do
             echo "  Found ${MESSAGE_COUNT} new message(s)"
         fi
 
-        # Process each message
-        echo "$BODY" | jq -c '.messages[]' 2>/dev/null | while read -r msg; do
+        # Process each message (use process substitution to avoid subshell variable scope issue)
+        while read -r msg; do
             # Get message ID
             msg_id=$(echo "$msg" | jq -r '.envelope.id // .id')
+
+            # Validate message ID format (security)
+            if [[ ! "$msg_id" =~ ^msg_[0-9]+_[a-f0-9]+$ ]] && [[ ! "$msg_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                if [ "$VERBOSE" = true ]; then
+                    echo "    Skipping invalid message ID: ${msg_id}"
+                fi
+                continue
+            fi
 
             # Check if already exists locally
             if [ -f "${AMP_INBOX_DIR}/${msg_id}.json" ]; then
@@ -184,7 +192,7 @@ for provider in "${PROVIDERS[@]}"; do
                     -H "Authorization: Bearer ${API_KEY}" \
                     >/dev/null 2>&1 || true
             fi
-        done
+        done < <(echo "$BODY" | jq -c '.messages[]' 2>/dev/null)
 
     elif [ "$HTTP_CODE" = "401" ]; then
         echo "Error: Authentication failed for ${provider}"
