@@ -60,9 +60,20 @@ ensure_amp_dirs() {
 
 # Get organization from AI Maestro
 # Returns organization name or empty string if not set
+# Falls back to "default" if AI Maestro is unreachable (for offline use)
 get_organization() {
     local response
     local org
+
+    # First check if we have a cached org in config
+    if [ -f "${AMP_CONFIG}" ]; then
+        local cached_tenant
+        cached_tenant=$(jq -r '.agent.tenant // empty' "${AMP_CONFIG}" 2>/dev/null)
+        if [ -n "$cached_tenant" ] && [ "$cached_tenant" != "default" ]; then
+            echo "$cached_tenant"
+            return 0
+        fi
+    fi
 
     # Try to fetch from AI Maestro
     response=$(curl -s --connect-timeout 2 "${AMP_MAESTRO_URL}/api/organization" 2>/dev/null) || true
@@ -75,7 +86,9 @@ get_organization() {
         fi
     fi
 
-    return 1
+    # Fallback for offline use - return "default" instead of failing
+    echo "default"
+    return 0
 }
 
 # Check if organization is set in AI Maestro
@@ -274,10 +287,12 @@ parse_address() {
         ADDR_PROVIDER="${AMP_PROVIDER_DOMAIN}"
     fi
 
-    # Check if local (aimaestro.local or legacy "local")
+    # Check if local (aimaestro.local or legacy "local" or "default.local")
+    # This ensures backward compatibility with old address formats
     if [ "${ADDR_PROVIDER}" = "${AMP_PROVIDER_DOMAIN}" ] || \
        [ "${ADDR_PROVIDER}" = "aimaestro.local" ] || \
-       [ "${ADDR_PROVIDER}" = "local" ]; then
+       [ "${ADDR_PROVIDER}" = "local" ] || \
+       [[ "${ADDR_PROVIDER}" == *".local" ]]; then
         ADDR_IS_LOCAL=true
     fi
 }

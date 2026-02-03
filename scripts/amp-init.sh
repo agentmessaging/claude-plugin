@@ -74,20 +74,22 @@ if [ -z "$TENANT" ]; then
     echo "Fetching organization from AI Maestro..."
     ORG=$(get_organization 2>/dev/null) || true
 
-    if [ -n "$ORG" ]; then
+    if [ -n "$ORG" ] && [ "$ORG" != "default" ]; then
         TENANT="$ORG"
         echo "  Organization: ${TENANT}"
     else
+        # Fallback to "default" for backward compatibility
+        # This allows offline initialization and legacy setups
+        TENANT="default"
         echo ""
-        echo "⚠️  Organization not configured in AI Maestro."
+        echo "⚠️  Note: Organization not configured in AI Maestro."
+        echo "   Using 'default' tenant for backward compatibility."
         echo ""
-        echo "Before using AMP, you must configure your organization:"
-        echo "  1. Open AI Maestro at ${AMP_MAESTRO_URL:-http://localhost:23000}"
-        echo "  2. Complete the organization setup"
+        echo "   For full mesh networking, configure your organization:"
+        echo "   1. Open AI Maestro at ${AMP_MAESTRO_URL:-http://localhost:23000}"
+        echo "   2. Complete the organization setup"
+        echo "   3. Run 'amp-init --force' to reinitialize with organization"
         echo ""
-        echo "Or specify a tenant manually with: amp-init --tenant myorg"
-        echo ""
-        exit 1
     fi
 fi
 
