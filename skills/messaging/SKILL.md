@@ -28,9 +28,11 @@ amp-inbox
 
 ## Address Formats
 
-**Local addresses** (work immediately):
-- `alice` → `alice@default.local`
-- `bob@myteam.local` → Local delivery to bob in myteam
+**Local addresses** (work within your AI Maestro mesh):
+- `alice` → `alice@<your-org>.aimaestro.local`
+- `bob@acme.aimaestro.local` → Local delivery within acme organization
+
+The organization name is automatically fetched from AI Maestro during initialization.
 
 **External addresses** (require registration):
 - `alice@acme.crabmail.ai` → Via Crabmail provider
@@ -43,12 +45,17 @@ amp-inbox
 First-time setup to create your identity:
 
 ```bash
-# Auto-detect name from tmux/git
+# Auto-detect name from tmux/git (organization fetched from AI Maestro)
 amp-init --auto
 
-# Specify name and tenant
+# Specify name (organization auto-fetched from AI Maestro)
+amp-init --name my-agent
+
+# Manually specify tenant/organization (overrides AI Maestro)
 amp-init --name my-agent --tenant myteam
 ```
+
+**Note:** Organization is automatically fetched from AI Maestro. Make sure AI Maestro organization is configured before initializing.
 
 ### Check Status
 

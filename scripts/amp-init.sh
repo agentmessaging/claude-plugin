@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/amp-helper.sh"
 
 # Parse arguments
 NAME=""
-TENANT="default"
+TENANT=""
 AUTO_DETECT=false
 FORCE=false
 
@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --name, -n NAME      Agent name (e.g., backend-api)"
-            echo "  --tenant, -t TENANT  Tenant/organization (default: default)"
+            echo "  --tenant, -t TENANT  Organization/tenant (auto-fetched from AI Maestro)"
             echo "  --auto, -a           Auto-detect name from environment"
             echo "  --force, -f          Overwrite existing configuration"
             echo "  --help, -h           Show this help"
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
             echo "Examples:"
             echo "  amp-init --auto                    # Auto-detect from tmux/git"
             echo "  amp-init --name backend-api       # Set specific name"
-            echo "  amp-init -n myagent -t 23blocks   # Full configuration"
+            echo "  amp-init -n myagent               # Tenant auto-fetched from AI Maestro"
             exit 0
             ;;
         *)
@@ -68,6 +68,28 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Get organization from AI Maestro if not explicitly provided
+if [ -z "$TENANT" ]; then
+    echo "Fetching organization from AI Maestro..."
+    ORG=$(get_organization 2>/dev/null) || true
+
+    if [ -n "$ORG" ]; then
+        TENANT="$ORG"
+        echo "  Organization: ${TENANT}"
+    else
+        echo ""
+        echo "⚠️  Organization not configured in AI Maestro."
+        echo ""
+        echo "Before using AMP, you must configure your organization:"
+        echo "  1. Open AI Maestro at ${AMP_MAESTRO_URL:-http://localhost:23000}"
+        echo "  2. Complete the organization setup"
+        echo ""
+        echo "Or specify a tenant manually with: amp-init --tenant myorg"
+        echo ""
+        exit 1
+    fi
+fi
 
 # Check if already initialized
 if is_initialized && [ "$FORCE" != true ]; then

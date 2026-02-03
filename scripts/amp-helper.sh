@@ -30,8 +30,14 @@ AMP_INBOX_DIR="${AMP_MESSAGES_DIR}/inbox"
 AMP_SENT_DIR="${AMP_MESSAGES_DIR}/sent"
 AMP_REGISTRATIONS_DIR="${AMP_DIR}/registrations"
 
-# Default local provider
-AMP_LOCAL_DOMAIN="local"
+# AI Maestro connection
+AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
+
+# Provider domain (AMP v1)
+AMP_PROVIDER_DOMAIN="aimaestro.local"
+
+# Default local domain (legacy, use AMP_PROVIDER_DOMAIN instead)
+AMP_LOCAL_DOMAIN="${AMP_PROVIDER_DOMAIN}"
 
 # =============================================================================
 # Directory Setup
@@ -46,6 +52,55 @@ ensure_amp_dirs() {
 
     # Secure permissions for keys directory
     chmod 700 "${AMP_KEYS_DIR}"
+}
+
+# =============================================================================
+# Organization (AI Maestro Integration)
+# =============================================================================
+
+# Get organization from AI Maestro
+# Returns organization name or empty string if not set
+get_organization() {
+    local response
+    local org
+
+    # Try to fetch from AI Maestro
+    response=$(curl -s --connect-timeout 2 "${AMP_MAESTRO_URL}/api/organization" 2>/dev/null) || true
+
+    if [ -n "$response" ]; then
+        org=$(echo "$response" | jq -r '.organization // empty' 2>/dev/null)
+        if [ -n "$org" ] && [ "$org" != "null" ]; then
+            echo "$org"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Check if organization is set in AI Maestro
+is_organization_set() {
+    local org
+    org=$(get_organization 2>/dev/null)
+    [ -n "$org" ]
+}
+
+# Get organization or fail with helpful message
+require_organization() {
+    local org
+    org=$(get_organization 2>/dev/null)
+
+    if [ -z "$org" ]; then
+        echo "Error: Organization not configured in AI Maestro." >&2
+        echo "" >&2
+        echo "Before using AMP, you must configure your organization:" >&2
+        echo "  1. Open AI Maestro at ${AMP_MAESTRO_URL}" >&2
+        echo "  2. Complete the organization setup" >&2
+        echo "" >&2
+        return 1
+    fi
+
+    echo "$org"
 }
 
 # =============================================================================
@@ -77,22 +132,29 @@ save_config() {
     local tenant="${2:-default}"
     local fingerprint="$3"
 
-    local address="${name}@${tenant}.${AMP_LOCAL_DOMAIN}"
+    # Build address: name@tenant.aimaestro.local
+    local address="${name}@${tenant}.${AMP_PROVIDER_DOMAIN}"
 
     jq -n \
         --arg name "$name" \
         --arg tenant "$tenant" \
         --arg address "$address" \
         --arg fingerprint "$fingerprint" \
+        --arg provider_domain "$AMP_PROVIDER_DOMAIN" \
+        --arg maestro_url "$AMP_MAESTRO_URL" \
         --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         '{
-            version: "1.0",
+            version: "1.1",
             agent: {
                 name: $name,
                 tenant: $tenant,
                 address: $address,
                 fingerprint: $fingerprint,
                 createdAt: $created
+            },
+            provider: {
+                domain: $provider_domain,
+                maestro_url: $maestro_url
             }
         }' > "${AMP_CONFIG}"
 
@@ -199,23 +261,33 @@ parse_address() {
             ADDR_PROVIDER="$domain"
         fi
     else
-        # Short form - just a name, use defaults
+        # Short form - just a name, use the configured tenant
         ADDR_NAME="$address"
-        ADDR_TENANT="${AMP_TENANT:-default}"
-        ADDR_PROVIDER="${AMP_LOCAL_DOMAIN}"
+        # Try to get tenant from config, then from AI Maestro, then default
+        if [ -n "${AMP_TENANT:-}" ]; then
+            ADDR_TENANT="${AMP_TENANT}"
+        else
+            local org
+            org=$(get_organization 2>/dev/null) || true
+            ADDR_TENANT="${org:-default}"
+        fi
+        ADDR_PROVIDER="${AMP_PROVIDER_DOMAIN}"
     fi
 
-    # Check if local
-    if [ "${ADDR_PROVIDER}" = "${AMP_LOCAL_DOMAIN}" ] || [ "${ADDR_PROVIDER}" = "aimaestro.local" ]; then
+    # Check if local (aimaestro.local or legacy "local")
+    if [ "${ADDR_PROVIDER}" = "${AMP_PROVIDER_DOMAIN}" ] || \
+       [ "${ADDR_PROVIDER}" = "aimaestro.local" ] || \
+       [ "${ADDR_PROVIDER}" = "local" ]; then
         ADDR_IS_LOCAL=true
     fi
 }
 
 # Build full address from components
+# Format: name@tenant.aimaestro.local
 build_address() {
     local name="$1"
     local tenant="${2:-default}"
-    local provider="${3:-${AMP_LOCAL_DOMAIN}}"
+    local provider="${3:-${AMP_PROVIDER_DOMAIN}}"
 
     echo "${name}@${tenant}.${provider}"
 }
