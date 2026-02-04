@@ -137,35 +137,145 @@ ROUTE=$(get_message_route "$RECIPIENT")
 # Create the message
 MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIORITY" "$REPLY_TO" "$CONTEXT")
 
+# =============================================================================
+# Sign the message (required for all delivery methods)
+# =============================================================================
+# Create canonical string for signing
+# Format: from|to|subject|payload_hash
+# Note: We exclude ID and timestamp because the API server generates its own.
+# This ensures signature validity regardless of transport metadata.
+# Use jq -c for compact JSON (same as JSON.stringify in Node.js)
+# Note: jq adds a trailing newline, so we remove it with tr before hashing
+PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | openssl dgst -sha256 -binary | base64 | tr -d '\n')
+FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
+TO_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.to')
+SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
+SIGN_DATA="${FROM_ADDR}|${TO_ADDR}|${SUBJ}|${PAYLOAD_HASH}"
+SIGNATURE=$(sign_message "$SIGN_DATA")
+
+# Add signature to message
+MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg sig "$SIGNATURE" '.envelope.signature = $sig')
+
+# =============================================================================
+# Routing Decision
+# =============================================================================
+# For "local" routes, check if we're registered with AI Maestro provider
+# If so, use the API for proper mesh routing; otherwise, fall back to filesystem
+
 if [ "$ROUTE" = "local" ]; then
-    # ==========================================================================
-    # Local Delivery
-    # ==========================================================================
+    # Check if registered with local AI Maestro provider
+    # This enables proper mesh routing across hosts
+    LOCAL_PROVIDER="${AMP_PROVIDER_DOMAIN}"
 
-    parse_address "$RECIPIENT"
-    FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
+    # Try to find AI Maestro registration
+    AI_MAESTRO_REG=""
+    for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
+        [ -f "$provider_file" ] || continue
+        provider=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
+        if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+            AI_MAESTRO_REG="$provider_file"
+            break
+        fi
+    done
 
-    # For local delivery, we store in both sent (our copy) and
-    # simulate delivery by storing in recipient's inbox
-    # In a real multi-machine setup, this would be different
+    if [ -n "$AI_MAESTRO_REG" ] && [ -f "$AI_MAESTRO_REG" ]; then
+        # ==========================================================================
+        # AI Maestro Provider Delivery (mesh routing)
+        # ==========================================================================
+        REGISTRATION=$(cat "$AI_MAESTRO_REG")
+        API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
+        API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
 
-    # Save to our sent folder
-    save_to_sent "$MESSAGE_JSON" >/dev/null
+        # Prepare API request body
+        parse_address "$RECIPIENT"
+        FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
 
-    # For true local delivery, we'd need to know where the recipient's
-    # inbox is. In single-machine scenarios, it's the same ~/.agent-messaging
-    # For now, we save to inbox (simulating local delivery on same machine)
-    INBOX_FILE=$(save_to_inbox "$MESSAGE_JSON")
+        API_BODY=$(jq -n \
+            --arg to "$FULL_RECIPIENT" \
+            --arg subject "$SUBJECT" \
+            --arg priority "$PRIORITY" \
+            --arg type "$TYPE" \
+            --arg message "$MESSAGE" \
+            --arg in_reply_to "$REPLY_TO" \
+            --argjson context "$CONTEXT" \
+            --arg signature "$SIGNATURE" \
+            '{
+                to: $to,
+                subject: $subject,
+                priority: $priority,
+                payload: {
+                    type: $type,
+                    message: $message,
+                    context: $context
+                },
+                in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
+                signature: $signature
+            }')
 
-    MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+        # Send via AI Maestro API
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/route" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${API_KEY}" \
+            -d "$API_BODY" 2>&1)
 
-    echo "✅ Message sent (local delivery)"
-    echo ""
-    echo "  To:       ${FULL_RECIPIENT}"
-    echo "  Subject:  ${SUBJECT}"
-    echo "  Priority: ${PRIORITY}"
-    echo "  Type:     ${TYPE}"
-    echo "  ID:       ${MSG_ID}"
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+            # Save to sent folder
+            save_to_sent "$MESSAGE_JSON" >/dev/null
+
+            MSG_ID=$(echo "$BODY" | jq -r '.id // empty')
+            [ -z "$MSG_ID" ] && MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+            DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "sent"')
+            DELIVERY_METHOD=$(echo "$BODY" | jq -r '.method // "api"')
+
+            echo "✅ Message sent via AI Maestro"
+            echo ""
+            echo "  To:       ${FULL_RECIPIENT}"
+            echo "  Subject:  ${SUBJECT}"
+            echo "  Priority: ${PRIORITY}"
+            echo "  Type:     ${TYPE}"
+            echo "  ID:       ${MSG_ID}"
+            echo "  Status:   ${DELIVERY_STATUS}"
+            echo "  Method:   ${DELIVERY_METHOD}"
+        else
+            echo "❌ Failed to send via AI Maestro (HTTP ${HTTP_CODE})"
+            ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
+            if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
+                echo "   Error: ${ERROR_MSG}"
+            fi
+            exit 1
+        fi
+
+    else
+        # ==========================================================================
+        # Filesystem Delivery (legacy, single-machine only)
+        # ==========================================================================
+        parse_address "$RECIPIENT"
+        FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
+
+        # Save to our sent folder
+        save_to_sent "$MESSAGE_JSON" >/dev/null
+
+        # For filesystem delivery, store in local inbox
+        # This only works when sender and recipient share the same machine
+        INBOX_FILE=$(save_to_inbox "$MESSAGE_JSON")
+
+        MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+        echo "✅ Message sent (filesystem delivery)"
+        echo ""
+        echo "  To:       ${FULL_RECIPIENT}"
+        echo "  Subject:  ${SUBJECT}"
+        echo "  Priority: ${PRIORITY}"
+        echo "  Type:     ${TYPE}"
+        echo "  ID:       ${MSG_ID}"
+        echo ""
+        echo "  Note: Using filesystem delivery. For mesh routing, register with AI Maestro:"
+        echo "        amp-register.sh --provider localhost:23000 --tenant ${AMP_TENANT}"
+    fi
 
 else
     # ==========================================================================

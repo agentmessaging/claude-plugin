@@ -510,7 +510,16 @@ sign_message() {
         return 1
     fi
 
-    echo -n "${message}" | openssl pkeyutl -sign -inkey "${private_key}" 2>/dev/null | base64 | tr -d '\n'
+    # Use temporary files for signing (OpenSSL 3.x has issues with Ed25519 + stdin)
+    local tmp_msg=$(mktemp)
+    local tmp_sig=$(mktemp)
+
+    echo -n "${message}" > "$tmp_msg"
+    if openssl pkeyutl -sign -inkey "${private_key}" -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
+        base64 < "$tmp_sig" | tr -d '\n'
+    fi
+
+    rm -f "$tmp_msg" "$tmp_sig"
 }
 
 # Verify a signature
