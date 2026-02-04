@@ -515,7 +515,8 @@ sign_message() {
     local tmp_sig=$(mktemp)
 
     echo -n "${message}" > "$tmp_msg"
-    if openssl pkeyutl -sign -inkey "${private_key}" -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
+    # Note: Ed25519 keys require -rawin flag for raw message signing
+    if openssl pkeyutl -sign -inkey "${private_key}" -rawin -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
         base64 < "$tmp_sig" | tr -d '\n'
     fi
 
@@ -528,9 +529,21 @@ verify_signature() {
     local signature="$2"
     local public_key_file="$3"
 
-    echo -n "${signature}" | base64 -d | \
-        openssl pkeyutl -verify -pubin -inkey "${public_key_file}" -sigfile /dev/stdin \
-        <<< "${message}" 2>/dev/null
+    # Use temporary files for verification (Ed25519 requires -rawin flag)
+    local tmp_msg=$(mktemp)
+    local tmp_sig=$(mktemp)
+
+    echo -n "${message}" > "$tmp_msg"
+    echo -n "${signature}" | base64 -d > "$tmp_sig"
+
+    # Note: Ed25519 keys require -rawin flag for raw message verification
+    local result=1
+    if openssl pkeyutl -verify -pubin -inkey "${public_key_file}" -rawin -in "$tmp_msg" -sigfile "$tmp_sig" 2>/dev/null; then
+        result=0
+    fi
+
+    rm -f "$tmp_msg" "$tmp_sig"
+    return $result
 }
 
 # =============================================================================
