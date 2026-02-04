@@ -150,17 +150,19 @@ if [ -z "$PUBLIC_KEY_HEX" ]; then
     exit 1
 fi
 
+# Get PEM-encoded public key (API expects PEM, not hex)
+PUBLIC_KEY_PEM=$(cat "${AMP_KEYS_DIR}/public.pem")
+
 # Build registration request
+# Note: API expects "name" not "agent_name", and "public_key" in PEM format
 REG_REQUEST=$(jq -n \
     --arg name "$NAME" \
     --arg tenant "$TENANT" \
-    --arg fingerprint "$AMP_FINGERPRINT" \
-    --arg publicKey "$PUBLIC_KEY_HEX" \
+    --arg publicKey "$PUBLIC_KEY_PEM" \
     '{
-        agent_name: $name,
+        name: $name,
         tenant: $tenant,
-        fingerprint: $fingerprint,
-        public_key_hex: $publicKey,
+        public_key: $publicKey,
         key_algorithm: "Ed25519"
     }')
 
