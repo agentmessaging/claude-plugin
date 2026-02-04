@@ -141,16 +141,22 @@ MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIOR
 # Sign the message (required for all delivery methods)
 # =============================================================================
 # Create canonical string for signing
-# Format: from|to|subject|payload_hash
-# Note: We exclude ID and timestamp because the API server generates its own.
-# This ensures signature validity regardless of transport metadata.
+# Format: from|to|subject|priority|in_reply_to|payload_hash
+#
+# This format follows AMP Protocol v1.1 specification:
+# - Signs only fields the CLIENT controls (not server-generated id/timestamp)
+# - Includes priority to prevent escalation attacks
+# - Includes in_reply_to to prevent thread hijacking
+# - payload_hash covers entire payload content
+#
 # Use jq -c for compact JSON (same as JSON.stringify in Node.js)
 # Note: jq adds a trailing newline, so we remove it with tr before hashing
 PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | openssl dgst -sha256 -binary | base64 | tr -d '\n')
 FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
 TO_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.to')
 SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
-SIGN_DATA="${FROM_ADDR}|${TO_ADDR}|${SUBJ}|${PAYLOAD_HASH}"
+# PRIORITY and REPLY_TO are already set from arguments (empty string if not provided)
+SIGN_DATA="${FROM_ADDR}|${TO_ADDR}|${SUBJ}|${PRIORITY}|${REPLY_TO}|${PAYLOAD_HASH}"
 SIGNATURE=$(sign_message "$SIGN_DATA")
 
 # Add signature to message
@@ -300,9 +306,15 @@ else
     # Update the 'from' address to use external address
     MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg from "$EXTERNAL_ADDRESS" '.envelope.from = $from')
 
-    # Sign the message
-    # Create canonical string for signing (envelope without signature)
-    SIGN_DATA=$(echo "$MESSAGE_JSON" | jq -r '[.envelope.id, .envelope.from, .envelope.to, .envelope.subject, .envelope.timestamp] | join("|")')
+    # Re-sign the message with the external address
+    # Format: from|to|subject|priority|in_reply_to|payload_hash (AMP Protocol v1.1)
+    EXT_FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
+    EXT_TO_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.to')
+    EXT_SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
+    EXT_PRIORITY=$(echo "$MESSAGE_JSON" | jq -r '.envelope.priority // "normal"')
+    EXT_REPLY_TO=$(echo "$MESSAGE_JSON" | jq -r '.payload.in_reply_to // ""')
+    EXT_PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | openssl dgst -sha256 -binary | base64 | tr -d '\n')
+    SIGN_DATA="${EXT_FROM_ADDR}|${EXT_TO_ADDR}|${EXT_SUBJ}|${EXT_PRIORITY}|${EXT_REPLY_TO}|${EXT_PAYLOAD_HASH}"
     SIGNATURE=$(sign_message "$SIGN_DATA")
 
     # Add signature to message
