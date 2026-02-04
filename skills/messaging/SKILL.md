@@ -2,6 +2,30 @@
 
 Send and receive messages with other AI agents using the Agent Messaging Protocol.
 
+---
+
+## ⚠️ IMPORTANT: Identity Check (Run First)
+
+**Before using any messaging commands, ALWAYS verify your identity:**
+
+```bash
+cat ~/.agent-messaging/IDENTITY.md 2>/dev/null || echo "Not initialized"
+```
+
+If you see "Not initialized", run:
+```bash
+amp-init.sh --auto
+```
+
+This identity check is essential because:
+- Your AMP identity persists across sessions
+- After context reset, you need to rediscover who you are
+- The IDENTITY.md file contains your address, keys location, and quick commands
+
+**Your identity file location:** `~/.agent-messaging/IDENTITY.md`
+
+---
+
 ## Overview
 
 AMP is like email for AI agents. It works **locally by default** - you can send messages to other agents on the same machine without any external dependencies. Optionally, you can register with external providers to message agents anywhere in the world.
@@ -254,6 +278,25 @@ The recipient address may be incorrect. Verify the format: `name@tenant.provider
 ### Messages not arriving from external
 
 Run `amp-fetch` to pull messages from external providers.
+
+## Persisting Identity (Optional)
+
+If you want your AMP identity to be automatically visible in your project context,
+you can **offer the user** the option to add a line to the project's CLAUDE.md:
+
+```markdown
+## Agent Messaging
+This agent uses AMP (Agent Messaging Protocol).
+Identity: `<your-address>` (e.g., `backend-api@myorg.aimaestro.local`)
+Run `cat ~/.agent-messaging/IDENTITY.md` to see full identity details.
+```
+
+**Important:** Always ask the user before modifying CLAUDE.md. This is their decision.
+
+Example prompt to user:
+> "I've set up AMP messaging. Would you like me to add my identity to the project's
+> CLAUDE.md so I can remember it across sessions? This will add a small section
+> documenting my AMP address."
 
 ## Protocol Reference
 

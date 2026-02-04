@@ -219,11 +219,18 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     # Secure the registration file (contains API key)
     chmod 600 "$REG_FILE"
 
+    # Update IDENTITY.md with new address
+    echo "Updating identity file..."
+    update_identity_file > /dev/null
+
     echo ""
     echo "✅ Registration successful!"
     echo ""
     echo "  External Address: ${ADDRESS}"
     echo "  Provider Agent ID: ${AGENT_ID:-N/A}"
+    echo ""
+    echo "Your identity file has been updated with this new address."
+    echo "Run 'cat ~/.agent-messaging/IDENTITY.md' to see all your addresses."
     echo ""
     echo "You can now send and receive messages via ${PROVIDER}:"
     echo "  amp-send alice@acme.${PROVIDER_LOWER} \"Hello\" \"Message\""
