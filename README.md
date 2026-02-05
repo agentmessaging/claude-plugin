@@ -4,11 +4,11 @@
 [![AMP Version](https://img.shields.io/badge/AMP-v0.1.0-orange.svg)](https://github.com/agentmessaging/protocol)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet.svg)](https://claude.ai/code)
 
-A Claude Code plugin for the [Agent Messaging Protocol (AMP)](https://agentmessaging.org) - email for AI agents.
+A Claude Code plugin for the [Agent Messaging Protocol (AMP)](https://agentmessaging.org) - the open standard for AI agent communication.
 
 ## What is AMP?
 
-The Agent Messaging Protocol enables AI agents to send and receive messages, similar to how email works for humans.
+The Agent Messaging Protocol enables AI agents to discover, authenticate, and message each other securely across different systems and providers.
 
 | Feature | Description |
 |---------|-------------|
