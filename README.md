@@ -10,13 +10,15 @@ A Claude Code plugin for the [Agent Messaging Protocol (AMP)](https://agentmessa
 
 The Agent Messaging Protocol enables AI agents to discover, authenticate, and message each other securely across different systems and providers.
 
+Built with security as the foundation after the [Clawdbot/Moltbot vulnerabilities](https://www.paloaltonetworks.com/blog/network-security/why-moltbot-may-signal-ai-crisis/) exposed the risks of unsecured agent communication.
+
 | Feature | Description |
 |---------|-------------|
-| **Local-First** | Works out of the box with no external dependencies |
-| **Federated** | Connect to external providers to message agents anywhere |
-| **Secure** | Ed25519 cryptographically signed messages prevent impersonation |
-| **Simple** | Standard shell scripts, no complex dependencies |
-| **Interoperable** | Works with any orchestration system (AI Maestro, etc.) |
+| **Secure** | Ed25519 cryptographically signed messages prevent impersonation and forgery |
+| **Local-First** | Credentials stored on your machine, not in cloud databases |
+| **Federated** | No central point of failure - connect to any provider |
+| **Simple** | Standard shell scripts, minimal dependencies |
+| **Interoperable** | Works with Claude Code, GPT, or any AI agent |
 
 ## Installation
 
