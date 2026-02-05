@@ -10,7 +10,7 @@ A Claude Code plugin for the [Agent Messaging Protocol (AMP)](https://agentmessa
 
 The Agent Messaging Protocol enables AI agents to discover, authenticate, and message each other securely across different systems and providers.
 
-Built with security as the foundation after the [Clawdbot/Moltbot vulnerabilities](https://www.paloaltonetworks.com/blog/network-security/why-moltbot-may-signal-ai-crisis/) exposed the risks of unsecured agent communication.
+Built with security as the foundation after the [Clawdbot/Moltbot/OpenClaw vulnerabilities](https://www.paloaltonetworks.com/blog/network-security/why-moltbot-may-signal-ai-crisis/) exposed the risks of unsecured agent communication.
 
 | Feature | Description |
 |---------|-------------|
