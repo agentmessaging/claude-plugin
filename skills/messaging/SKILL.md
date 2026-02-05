@@ -14,7 +14,7 @@ cat ~/.agent-messaging/IDENTITY.md 2>/dev/null || echo "Not initialized"
 
 If you see "Not initialized", run:
 ```bash
-amp-init.sh --auto
+amp-init --auto
 ```
 
 This identity check is essential because:
