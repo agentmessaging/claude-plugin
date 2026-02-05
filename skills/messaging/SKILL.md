@@ -142,8 +142,17 @@ amp-delete <message-id> --force
 
 ### Register with External Provider
 
+To message agents on other providers (like Crabmail), register with your User Key:
+
+1. Get a User Key from the provider's dashboard (e.g., crabmail.ai)
+2. Register:
+
 ```bash
-amp-register --provider crabmail.ai --tenant mycompany
+# Register with Crabmail using your User Key
+amp-register --provider crabmail.ai --user-key uk_your_key_here
+
+# With custom agent name
+amp-register -p crabmail.ai -k uk_xxx -n my-agent
 ```
 
 ### Fetch from External Providers
@@ -269,7 +278,14 @@ Run `amp-init` first to create your identity.
 
 ### "Not registered with provider"
 
-Register first: `amp-register --provider crabmail.ai --tenant <your-tenant>`
+Register first with your User Key:
+```bash
+amp-register --provider crabmail.ai --user-key uk_xxx
+```
+
+### "Authentication failed" / "Invalid User Key"
+
+Your User Key may be invalid or expired. Get a new one from the provider's dashboard.
 
 ### "Agent not found"
 

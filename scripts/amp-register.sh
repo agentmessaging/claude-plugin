@@ -7,8 +7,11 @@
 # This enables sending/receiving messages with agents on other providers.
 #
 # Usage:
-#   amp-register --provider crabmail.ai --tenant mycompany
-#   amp-register --provider crabmail.ai --tenant mycompany --name myagent
+#   amp-register --provider crabmail.ai --user-key uk_xxx
+#   amp-register --provider crabmail.ai --user-key uk_xxx --name myagent
+#
+# For providers that don't require user key (legacy):
+#   amp-register --provider myprovider.com --tenant mycompany
 #
 # =============================================================================
 
@@ -18,26 +21,44 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/amp-helper.sh"
 
-# Known providers
-declare -A PROVIDER_APIS
-PROVIDER_APIS["crabmail.ai"]="https://api.crabmail.ai"
-PROVIDER_APIS["crabmail"]="https://api.crabmail.ai"
+# Helper function to get API URL for known providers
+get_provider_api() {
+    local provider="$1"
+    case "$provider" in
+        crabmail.ai|crabmail) echo "https://api.crabmail.ai" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Helper function to check if provider requires user key
+provider_requires_user_key() {
+    local provider="$1"
+    case "$provider" in
+        crabmail.ai|crabmail) return 0 ;;  # true
+        *) return 1 ;;  # false
+    esac
+}
 
 # Parse arguments
 PROVIDER=""
 TENANT=""
 NAME=""
 API_URL=""
+USER_KEY=""
 FORCE=false
 
 show_help() {
-    echo "Usage: amp-register --provider <provider> --tenant <tenant> [options]"
+    echo "Usage: amp-register --provider <provider> --user-key <key> [options]"
     echo ""
     echo "Register your agent with an external AMP provider."
     echo ""
     echo "Required:"
     echo "  --provider, -p PROVIDER   Provider domain (e.g., crabmail.ai)"
-    echo "  --tenant, -t TENANT       Your organization/tenant name"
+    echo ""
+    echo "Authentication (one of):"
+    echo "  --user-key, -k KEY        User Key from provider dashboard (e.g., uk_xxx)"
+    echo "  --token TOKEN             Alias for --user-key"
+    echo "  --tenant, -t TENANT       Organization name (legacy, for providers without user keys)"
     echo ""
     echo "Options:"
     echo "  --name, -n NAME           Agent name (default: from local config)"
@@ -46,11 +67,17 @@ show_help() {
     echo "  --help, -h                Show this help"
     echo ""
     echo "Supported providers:"
-    echo "  - crabmail.ai            Crabmail (default AMP provider)"
+    echo "  - crabmail.ai            Crabmail (requires --user-key)"
     echo ""
     echo "Examples:"
-    echo "  amp-register --provider crabmail.ai --tenant 23blocks"
-    echo "  amp-register -p crabmail.ai -t mycompany -n backend-api"
+    echo "  # Register with Crabmail (get user key from dashboard)"
+    echo "  amp-register --provider crabmail.ai --user-key uk_dXNyXzEyMzQ1"
+    echo ""
+    echo "  # Register with custom name"
+    echo "  amp-register -p crabmail.ai -k uk_xxx -n backend-api"
+    echo ""
+    echo "  # Legacy: Provider without user key auth"
+    echo "  amp-register -p myprovider.com -t mycompany"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -61,6 +88,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --tenant|-t)
             TENANT="$2"
+            shift 2
+            ;;
+        --user-key|-k|--token)
+            USER_KEY="$2"
             shift 2
             ;;
         --name|-n)
@@ -95,8 +126,26 @@ if [ -z "$PROVIDER" ]; then
     exit 1
 fi
 
-if [ -z "$TENANT" ]; then
-    echo "Error: Tenant required (--tenant)"
+# Normalize provider name for lookups
+PROVIDER_LOWER=$(echo "$PROVIDER" | tr '[:upper:]' '[:lower:]')
+
+# Check if provider requires user key
+if provider_requires_user_key "$PROVIDER_LOWER"; then
+    if [ -z "$USER_KEY" ]; then
+        echo "Error: ${PROVIDER} requires a User Key for registration"
+        echo ""
+        echo "Get your User Key from the ${PROVIDER} dashboard, then run:"
+        echo "  amp-register --provider ${PROVIDER} --user-key uk_xxx"
+        echo ""
+        exit 1
+    fi
+    # Validate user key format
+    if [[ ! "$USER_KEY" =~ ^uk_ ]]; then
+        echo "Error: Invalid User Key format. Expected: uk_xxx"
+        exit 1
+    fi
+elif [ -z "$TENANT" ] && [ -z "$USER_KEY" ]; then
+    echo "Error: Either --user-key or --tenant required"
     echo ""
     show_help
     exit 1
@@ -110,12 +159,9 @@ if [ -z "$NAME" ]; then
     NAME="$AMP_AGENT_NAME"
 fi
 
-# Normalize provider name
-PROVIDER_LOWER=$(echo "$PROVIDER" | tr '[:upper:]' '[:lower:]')
-
-# Get API URL
+# Get API URL (PROVIDER_LOWER already set above)
 if [ -z "$API_URL" ]; then
-    API_URL="${PROVIDER_APIS[$PROVIDER_LOWER]}"
+    API_URL=$(get_provider_api "$PROVIDER_LOWER")
     if [ -z "$API_URL" ]; then
         # Assume standard API URL format
         API_URL="https://api.${PROVIDER_LOWER}"
@@ -139,7 +185,12 @@ echo "Registering with ${PROVIDER}..."
 echo ""
 echo "  Provider: ${PROVIDER}"
 echo "  API:      ${API_URL}"
-echo "  Tenant:   ${TENANT}"
+if [ -n "$USER_KEY" ]; then
+    echo "  Auth:     User Key (${USER_KEY:0:10}...)"
+fi
+if [ -n "$TENANT" ]; then
+    echo "  Tenant:   ${TENANT}"
+fi
 echo "  Name:     ${NAME}"
 echo ""
 
@@ -153,24 +204,48 @@ fi
 # Get PEM-encoded public key (API expects PEM, not hex)
 PUBLIC_KEY_PEM=$(cat "${AMP_KEYS_DIR}/public.pem")
 
-# Build registration request
-# Note: API expects "name" not "agent_name", and "public_key" in PEM format
-REG_REQUEST=$(jq -n \
-    --arg name "$NAME" \
-    --arg tenant "$TENANT" \
-    --arg publicKey "$PUBLIC_KEY_PEM" \
-    '{
-        name: $name,
-        tenant: $tenant,
-        public_key: $publicKey,
-        key_algorithm: "Ed25519"
-    }')
+# Build registration request based on auth method
+if [ -n "$USER_KEY" ]; then
+    # User Key auth: tenant comes from the key, not the request
+    REG_REQUEST=$(jq -n \
+        --arg name "$NAME" \
+        --arg publicKey "$PUBLIC_KEY_PEM" \
+        '{
+            name: $name,
+            public_key: $publicKey,
+            key_algorithm: "Ed25519"
+        }')
+
+    # Build auth header
+    AUTH_HEADER="Authorization: Bearer ${USER_KEY}"
+else
+    # Legacy: tenant in request body
+    REG_REQUEST=$(jq -n \
+        --arg name "$NAME" \
+        --arg tenant "$TENANT" \
+        --arg publicKey "$PUBLIC_KEY_PEM" \
+        '{
+            name: $name,
+            tenant: $tenant,
+            public_key: $publicKey,
+            key_algorithm: "Ed25519"
+        }')
+
+    AUTH_HEADER=""
+fi
 
 # Send registration request
 echo "Sending registration request..."
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/v1/register" \
-    -H "Content-Type: application/json" \
-    -d "$REG_REQUEST" 2>&1)
+if [ -n "$AUTH_HEADER" ]; then
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/v1/register" \
+        -H "Content-Type: application/json" \
+        -H "$AUTH_HEADER" \
+        -d "$REG_REQUEST" 2>&1)
+else
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/v1/register" \
+        -H "Content-Type: application/json" \
+        -d "$REG_REQUEST" 2>&1)
+fi
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -181,6 +256,8 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     AGENT_ID=$(echo "$BODY" | jq -r '.agent_id // .agentId // empty')
     API_KEY=$(echo "$BODY" | jq -r '.api_key // .apiKey // empty')
     ADDRESS=$(echo "$BODY" | jq -r '.address // empty')
+    SHORT_ADDRESS=$(echo "$BODY" | jq -r '.short_address // .shortAddress // empty')
+    RESP_TENANT=$(echo "$BODY" | jq -r '.tenant // empty')
 
     if [ -z "$API_KEY" ]; then
         echo "Error: Provider did not return API key"
@@ -188,9 +265,18 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
         exit 1
     fi
 
+    # Use tenant from response if available (for user key auth)
+    if [ -n "$RESP_TENANT" ]; then
+        TENANT="$RESP_TENANT"
+    fi
+
     # Build external address if not returned
     if [ -z "$ADDRESS" ]; then
-        ADDRESS="${NAME}@${TENANT}.${PROVIDER_LOWER}"
+        if [ -n "$TENANT" ]; then
+            ADDRESS="${NAME}@${TENANT}.${PROVIDER_LOWER}"
+        else
+            ADDRESS="${NAME}@${PROVIDER_LOWER}"
+        fi
     fi
 
     # Save registration
@@ -202,6 +288,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
         --arg agentName "$NAME" \
         --arg tenant "$TENANT" \
         --arg address "$ADDRESS" \
+        --arg shortAddress "$SHORT_ADDRESS" \
         --arg apiKey "$API_KEY" \
         --arg providerAgentId "$AGENT_ID" \
         --arg fingerprint "$AMP_FINGERPRINT" \
@@ -212,6 +299,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
             agentName: $agentName,
             tenant: $tenant,
             address: $address,
+            shortAddress: $shortAddress,
             apiKey: $apiKey,
             providerAgentId: $providerAgentId,
             fingerprint: $fingerprint,
@@ -236,6 +324,31 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     echo ""
     echo "You can now send and receive messages via ${PROVIDER}:"
     echo "  amp-send alice@acme.${PROVIDER_LOWER} \"Hello\" \"Message\""
+
+elif [ "$HTTP_CODE" = "401" ]; then
+    ERROR_MSG=$(echo "$BODY" | jq -r '.message // .error // "Unauthorized"' 2>/dev/null)
+    echo "Error: Authentication failed - ${ERROR_MSG}"
+    echo ""
+    if [ -n "$USER_KEY" ]; then
+        echo "Your User Key may be invalid or expired."
+        echo "Get a new User Key from the ${PROVIDER} dashboard."
+    else
+        echo "This provider may require a User Key for registration."
+        echo "Try: amp-register --provider ${PROVIDER} --user-key uk_xxx"
+    fi
+    exit 1
+
+elif [ "$HTTP_CODE" = "403" ]; then
+    ERROR_MSG=$(echo "$BODY" | jq -r '.message // .error // "Forbidden"' 2>/dev/null)
+    echo "Error: Access denied - ${ERROR_MSG}"
+    echo ""
+    echo "This may mean:"
+    echo "  - Your subscription is inactive"
+    echo "  - You've reached your agent limit"
+    echo "  - Your account needs verification"
+    echo ""
+    echo "Check your account at ${PROVIDER}"
+    exit 1
 
 elif [ "$HTTP_CODE" = "409" ]; then
     echo "Error: Agent already registered with this provider"
