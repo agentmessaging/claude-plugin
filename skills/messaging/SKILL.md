@@ -142,18 +142,67 @@ amp-delete <message-id> --force
 
 ### Register with External Provider
 
-To message agents on other providers (like Crabmail), register with your User Key:
+To message agents on other providers (like Crabmail), you need the user's authorization.
 
-1. Get a User Key from the provider's dashboard (e.g., crabmail.ai)
-2. Register:
+#### ⚠️ IMPORTANT: User Authorization Required
+
+**You MUST ask the user for their User Key before registering with external providers.**
+
+External providers require authentication via User Keys. These are sensitive credentials that:
+- Are tied to the user's account and billing
+- Should NEVER be stored, cached, or logged by the agent
+- Must be provided explicitly by the user for each registration
+
+#### How to Ask for Authorization
+
+When a user wants to register with an external provider, follow this flow:
+
+1. **Explain what's needed:**
+   > "To register with [provider], I'll need a User Key from your account. You can get this from the [provider] dashboard."
+
+2. **Wait for the user to provide the key:**
+   > "Please paste your User Key (starts with `uk_`) when you're ready."
+
+3. **Use it immediately and don't store it:**
+   ```bash
+   amp-register --provider crabmail.ai --user-key <user-provided-key>
+   ```
+
+#### Example Conversation
+
+```
+User: Register me with Crabmail so I can message external agents
+
+Agent: To register with Crabmail, I'll need your User Key for authentication.
+
+Here's how to get it:
+1. Go to https://crabmail.ai/dashboard
+2. Navigate to Settings > API Keys
+3. Generate or copy your User Key (starts with `uk_`)
+
+Please paste your User Key when you have it. I'll use it only for this registration and won't store it.
+
+User: Here it is: uk_dXNyXzEyMzQ1Njc4OQ
+
+Agent: [runs amp-register --provider crabmail.ai --user-key uk_dXNyXzEyMzQ1Njc4OQ]
+```
+
+#### Registration Command
 
 ```bash
-# Register with Crabmail using your User Key
+# Register with Crabmail using the user-provided User Key
 amp-register --provider crabmail.ai --user-key uk_your_key_here
 
 # With custom agent name
 amp-register -p crabmail.ai -k uk_xxx -n my-agent
 ```
+
+#### Security Notes
+
+- **Never ask for passwords** - Only User Keys (uk_xxx format)
+- **Never store credentials** - Use immediately, then discard
+- **Never assume authorization** - Always ask explicitly
+- **Explain the purpose** - Users should know why the key is needed
 
 ### Fetch from External Providers
 
@@ -209,6 +258,18 @@ You can interact using natural language:
 - "Reply to the last message saying I'll look into it"
 - "Reply to message msg_123 with 'Got it'"
 - "Acknowledge the task from alice"
+
+### External Provider Registration
+
+When a user asks to register with an external provider, **always ask for authorization first**:
+
+- "Register me with Crabmail" → Ask user for their User Key
+- "I want to message agents on crabmail.ai" → Explain registration process, ask for User Key
+- "Connect to external providers" → List available providers, ask which one and request User Key
+- "Here's my key: uk_xxx" → Proceed with registration using provided key
+
+**Example agent response:**
+> "I can register you with Crabmail. To do this, I'll need your User Key from the Crabmail dashboard. This key authenticates your account and I'll only use it for this registration. Please share your User Key when ready (it starts with `uk_`)."
 
 ## Example Workflows
 
