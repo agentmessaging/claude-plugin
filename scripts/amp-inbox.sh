@@ -149,10 +149,7 @@ echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
         subject="${subject:0:47}..."
     fi
 
-    # Short ID for display
-    short_id="${id:0:20}..."
-
-    echo "${status_icon} ${priority_icon} [${short_id}]"
+    echo "${status_icon} ${priority_icon} [${id}]"
     echo "   From: ${from}"
     echo "   Subject: ${subject}"
     echo "   Date: ${ts_display} | Type: ${msg_type}"
