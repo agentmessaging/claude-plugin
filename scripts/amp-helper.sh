@@ -21,6 +21,58 @@ if [ -f "${SCRIPT_DIR_HELPER}/amp-security.sh" ]; then
     source "${SCRIPT_DIR_HELPER}/amp-security.sh"
 fi
 
+# =============================================================================
+# OpenSSL Auto-Detection
+# =============================================================================
+# macOS ships with LibreSSL which doesn't support Ed25519.
+# We auto-detect a compatible OpenSSL binary (Homebrew or system).
+
+_detect_openssl() {
+    # Homebrew paths (Intel Mac, Apple Silicon, Linux linuxbrew)
+    local candidates=(
+        "/usr/local/opt/openssl@3/bin/openssl"
+        "/opt/homebrew/opt/openssl@3/bin/openssl"
+        "/usr/local/opt/openssl/bin/openssl"
+        "/opt/homebrew/opt/openssl/bin/openssl"
+        "/home/linuxbrew/.linuxbrew/opt/openssl@3/bin/openssl"
+    )
+
+    # Test system openssl first (fastest path - works on Linux)
+    if command -v openssl &>/dev/null; then
+        if openssl genpkey -algorithm Ed25519 2>/dev/null | grep -q "PRIVATE KEY"; then
+            echo "openssl"
+            return 0
+        fi
+    fi
+
+    # Search Homebrew paths
+    for candidate in "${candidates[@]}"; do
+        if [ -x "$candidate" ]; then
+            if "$candidate" genpkey -algorithm Ed25519 2>/dev/null | grep -q "PRIVATE KEY"; then
+                echo "$candidate"
+                return 0
+            fi
+        fi
+    done
+
+    # Nothing found
+    echo ""
+    return 1
+}
+
+# Detect once and cache
+OPENSSL_BIN=$(_detect_openssl)
+
+if [ -z "$OPENSSL_BIN" ]; then
+    echo "Error: No Ed25519-capable OpenSSL found." >&2
+    echo "" >&2
+    echo "macOS ships with LibreSSL which lacks Ed25519 support." >&2
+    echo "Install OpenSSL 3 via Homebrew:" >&2
+    echo "  brew install openssl@3" >&2
+    echo "" >&2
+    exit 1
+fi
+
 # Configuration
 #
 # Per-Agent Isolation:
@@ -507,17 +559,17 @@ generate_keypair() {
     local public_key="${AMP_KEYS_DIR}/public.pem"
 
     # Generate private key
-    openssl genpkey -algorithm Ed25519 -out "${private_key}" 2>/dev/null
+    $OPENSSL_BIN genpkey -algorithm Ed25519 -out "${private_key}" 2>/dev/null
     chmod 600 "${private_key}"
 
     # Extract public key
-    openssl pkey -in "${private_key}" -pubout -out "${public_key}" 2>/dev/null
+    $OPENSSL_BIN pkey -in "${private_key}" -pubout -out "${public_key}" 2>/dev/null
     chmod 644 "${public_key}"
 
     # Calculate fingerprint
     local fingerprint
-    fingerprint=$(openssl pkey -in "${private_key}" -pubout -outform DER 2>/dev/null | \
-                  openssl dgst -sha256 -binary | base64)
+    fingerprint=$($OPENSSL_BIN pkey -in "${private_key}" -pubout -outform DER 2>/dev/null | \
+                  $OPENSSL_BIN dgst -sha256 -binary | base64)
 
     echo "SHA256:${fingerprint}"
 }
@@ -532,7 +584,7 @@ get_public_key_hex() {
     fi
 
     # Extract raw public key bytes and convert to hex
-    openssl pkey -pubin -in "${public_key}" -outform DER 2>/dev/null | \
+    $OPENSSL_BIN pkey -pubin -in "${public_key}" -outform DER 2>/dev/null | \
         tail -c 32 | xxd -p | tr -d '\n'
 }
 
@@ -552,7 +604,7 @@ sign_message() {
 
     echo -n "${message}" > "$tmp_msg"
     # Note: Ed25519 keys require -rawin flag for raw message signing
-    if openssl pkeyutl -sign -inkey "${private_key}" -rawin -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
+    if $OPENSSL_BIN pkeyutl -sign -inkey "${private_key}" -rawin -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
         base64 < "$tmp_sig" | tr -d '\n'
     fi
 
@@ -574,7 +626,7 @@ verify_signature() {
 
     # Note: Ed25519 keys require -rawin flag for raw message verification
     local result=1
-    if openssl pkeyutl -verify -pubin -inkey "${public_key_file}" -rawin -in "$tmp_msg" -sigfile "$tmp_sig" 2>/dev/null; then
+    if $OPENSSL_BIN pkeyutl -verify -pubin -inkey "${public_key_file}" -rawin -in "$tmp_msg" -sigfile "$tmp_sig" 2>/dev/null; then
         result=0
     fi
 
