@@ -659,9 +659,9 @@ generate_message_id() {
 # Validate message ID format (security: prevent path traversal)
 validate_message_id() {
     local id="$1"
-    # Message IDs must match: msg_<timestamp>_<hex>
-    # Only allow alphanumeric, underscores - no slashes, dots, etc.
-    if [[ ! "$id" =~ ^msg_[0-9]+_[a-f0-9]+$ ]]; then
+    # Message IDs: msg_<timestamp>_<hex> or msg-<timestamp>-<alphanum>
+    # Only allow alphanumeric, underscores, hyphens - no slashes, dots, etc.
+    if [[ ! "$id" =~ ^msg[_-][0-9]+[_-][a-zA-Z0-9]+$ ]]; then
         echo "Error: Invalid message ID format: ${id}" >&2
         return 1
     fi
