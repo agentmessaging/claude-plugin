@@ -459,7 +459,7 @@ else
     EXT_TO_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.to')
     EXT_SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
     EXT_PRIORITY=$(echo "$MESSAGE_JSON" | jq -r '.envelope.priority // "normal"')
-    EXT_REPLY_TO=$(echo "$MESSAGE_JSON" | jq -r '.payload.in_reply_to // ""')
+    EXT_REPLY_TO=$(echo "$MESSAGE_JSON" | jq -r '.envelope.in_reply_to // ""')
     EXT_PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary | base64 | tr -d '\n')
     SIGN_DATA="${EXT_FROM_ADDR}|${EXT_TO_ADDR}|${EXT_SUBJ}|${EXT_PRIORITY}|${EXT_REPLY_TO}|${EXT_PAYLOAD_HASH}"
     SIGNATURE=$(sign_message "$SIGN_DATA")

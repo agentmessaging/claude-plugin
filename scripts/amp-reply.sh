@@ -11,7 +11,7 @@
 #
 # =============================================================================
 
-set -e
+# Note: set -e intentionally omitted — read_message may fail and we handle it below
 
 # Source helper functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,9 +85,9 @@ REPLY_MESSAGE="${POSITIONAL[1]}"
 require_init
 
 # Read the original message
-ORIGINAL=$(read_message "$MESSAGE_ID" "inbox" 2>/dev/null)
+ORIGINAL=$(read_message "$MESSAGE_ID" "inbox" 2>/dev/null) || true
 
-if [ $? -ne 0 ] || [ -z "$ORIGINAL" ]; then
+if [ -z "$ORIGINAL" ]; then
     echo "Error: Message not found: ${MESSAGE_ID}"
     echo ""
     echo "Make sure the message ID is correct. Use 'amp-inbox' to list messages."

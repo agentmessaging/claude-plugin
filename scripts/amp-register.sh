@@ -325,7 +325,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     echo "  Provider Agent ID: ${AGENT_ID:-N/A}"
     echo ""
     echo "Your identity file has been updated with this new address."
-    echo "Run 'cat ~/.agent-messaging/IDENTITY.md' to see all your addresses."
+    echo "Run 'cat ${AMP_DIR}/IDENTITY.md' to see all your addresses."
     echo ""
     echo "You can now send and receive messages via ${PROVIDER}:"
     echo "  amp-send alice@acme.${PROVIDER_LOWER} \"Hello\" \"Message\""

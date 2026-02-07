@@ -183,14 +183,12 @@ for provider in "${PROVIDERS[@]}"; do
                 # External provider: attempt local verification if sender's public
                 # key is cached (e.g. from a previous registration exchange).
                 # Without the sender's key, we mark it as unverified but still accept.
-                local sender_addr
                 sender_addr=$(echo "$msg" | jq -r '.envelope.from // empty')
-                local sender_name="${sender_addr%%@*}"
-                local sender_pubkey="${AMP_AGENTS_BASE}/${sender_name}/keys/public.pem"
+                sender_name="${sender_addr%%@*}"
+                sender_pubkey="${AMP_AGENTS_BASE}/${sender_name}/keys/public.pem"
 
                 if [ -f "$sender_pubkey" ]; then
                     # Reconstruct canonical signing data and verify
-                    local v_to v_subj v_pri v_reply v_phash v_sdata
                     v_to=$(echo "$msg" | jq -r '.envelope.to // empty')
                     v_subj=$(echo "$msg" | jq -r '.envelope.subject // empty')
                     v_pri=$(echo "$msg" | jq -r '.envelope.priority // "normal"')

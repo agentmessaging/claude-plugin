@@ -83,7 +83,8 @@ if [ -d "$AMP_REGISTRATIONS_DIR" ]; then
         provider=$(basename "$reg_file" .json)
         address=$(jq -r '.address' "$reg_file")
         registered=$(jq -r '.registeredAt' "$reg_file")
-        REGISTRATIONS+=("{\"provider\":\"$provider\",\"address\":\"$address\",\"registeredAt\":\"$registered\"}")
+        # Use jq for safe JSON construction (handles special chars in values)
+        REGISTRATIONS+=("$(jq -n --arg p "$provider" --arg a "$address" --arg r "$registered" '{provider:$p,address:$a,registeredAt:$r}')")
     done
     shopt -u nullglob
 fi

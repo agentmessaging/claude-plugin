@@ -37,18 +37,22 @@ _detect_openssl() {
         "/home/linuxbrew/.linuxbrew/opt/openssl@3/bin/openssl"
     )
 
-    # Test system openssl first (fastest path - works on Linux)
+    # Quick check: if system openssl is OpenSSL 3.x+, Ed25519 is supported
     if command -v openssl &>/dev/null; then
-        if openssl genpkey -algorithm Ed25519 2>/dev/null | grep -q "PRIVATE KEY"; then
+        local ver
+        ver=$(openssl version 2>/dev/null || true)
+        if [[ "$ver" == OpenSSL\ 3.* ]] || [[ "$ver" == OpenSSL\ 1.1.1* ]]; then
             echo "openssl"
             return 0
         fi
     fi
 
-    # Search Homebrew paths
+    # Search Homebrew paths (check version string, not key generation)
     for candidate in "${candidates[@]}"; do
         if [ -x "$candidate" ]; then
-            if "$candidate" genpkey -algorithm Ed25519 2>/dev/null | grep -q "PRIVATE KEY"; then
+            local ver
+            ver=$("$candidate" version 2>/dev/null || true)
+            if [[ "$ver" == OpenSSL\ 3.* ]] || [[ "$ver" == OpenSSL\ 1.1.1* ]]; then
                 echo "$candidate"
                 return 0
             fi
@@ -672,7 +676,9 @@ verify_signature() {
 #   bob@myrepo.github.rnd23blocks.aimaestro.local → name=bob, tenant=rnd23blocks, provider=aimaestro.local, scope=myrepo.github
 #   carol@acme.crabmail.ai → name=carol, tenant=acme, provider=crabmail.ai
 parse_address() {
-    local address="$1"
+    # Normalize to lowercase for case-insensitive matching
+    local address
+    address=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 
     # Reset
     ADDR_NAME=""
@@ -728,10 +734,11 @@ parse_address() {
     fi
 
     # Check if local (aimaestro.local or legacy "local" or "default.local")
+    # Note: Only treat specific known local domains as local, not any *.local
     if [ "${ADDR_PROVIDER}" = "${AMP_PROVIDER_DOMAIN}" ] || \
        [ "${ADDR_PROVIDER}" = "aimaestro.local" ] || \
        [ "${ADDR_PROVIDER}" = "local" ] || \
-       [[ "${ADDR_PROVIDER}" == *".local" ]]; then
+       [ "${ADDR_PROVIDER}" = "default.local" ]; then
         ADDR_IS_LOCAL=true
     fi
 }
@@ -752,8 +759,16 @@ build_address() {
 
 # Generate message ID
 generate_message_id() {
-    local timestamp=$(date +%s%N | cut -c1-13)
-    local random=$(head -c 4 /dev/urandom | xxd -p)
+    # macOS date doesn't support %N (nanoseconds), so use python/perl fallback
+    local timestamp
+    if timestamp=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null); then
+        : # got millisecond timestamp
+    else
+        # Fallback: seconds with random suffix for uniqueness
+        timestamp="$(date +%s)000"
+    fi
+    local random
+    random=$(head -c 4 /dev/urandom | xxd -p)
     echo "msg_${timestamp}_${random}"
 }
 
