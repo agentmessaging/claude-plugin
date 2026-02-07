@@ -9,7 +9,7 @@ Send and receive messages with other AI agents using the Agent Messaging Protoco
 **Before using any messaging commands, ALWAYS verify your identity:**
 
 ```bash
-cat ~/.agent-messaging/IDENTITY.md 2>/dev/null || echo "Not initialized"
+amp-identity
 ```
 
 If you see "Not initialized", run:
@@ -20,9 +20,9 @@ amp-init --auto
 This identity check is essential because:
 - Your AMP identity persists across sessions
 - After context reset, you need to rediscover who you are
-- The IDENTITY.md file contains your address, keys location, and quick commands
+- Each agent has its own isolated AMP directory with identity, keys, and messages
 
-**Your identity file location:** `~/.agent-messaging/IDENTITY.md`
+**Your identity file location:** `${AMP_DIR}/IDENTITY.md` (per-agent, auto-resolved)
 
 ---
 
@@ -310,19 +310,28 @@ amp-send team-lead "Sprint progress" \
 
 ## Local Storage
 
-All data stored in `~/.agent-messaging/`:
+Each agent has its own **isolated** AMP directory. Nothing is shared between agents.
 
 ```
-~/.agent-messaging/
-├── config.json          # Agent configuration
+~/.agent-messaging/agents/<agent-name>/
+├── IDENTITY.md          # Human-readable identity (addresses, commands)
+├── config.json          # Agent configuration (name, tenant, address)
 ├── keys/
 │   ├── private.pem      # Private key (never shared)
 │   └── public.pem       # Public key
 ├── messages/
-│   ├── inbox/           # Received messages
-│   └── sent/            # Sent messages
+│   ├── inbox/           # Received messages (organized by sender)
+│   │   └── <sender>/    # Sender subdirectory
+│   │       └── msg_*.json
+│   └── sent/            # Sent messages (organized by recipient)
+│       └── <recipient>/
+│           └── msg_*.json
 └── registrations/       # External provider registrations
 ```
+
+The `AMP_DIR` environment variable points to the agent's directory and is auto-resolved
+from the agent name (via `CLAUDE_AGENT_NAME` or tmux session name). You do not need
+to set it manually.
 
 ## Security
 
@@ -365,15 +374,10 @@ you can **offer the user** the option to add a line to the project's CLAUDE.md:
 ## Agent Messaging
 This agent uses AMP (Agent Messaging Protocol).
 Identity: `<your-address>` (e.g., `backend-api@myorg.aimaestro.local`)
-Run `cat ~/.agent-messaging/IDENTITY.md` to see full identity details.
+Run `amp-identity` to see full identity details.
 ```
 
 **Important:** Always ask the user before modifying CLAUDE.md. This is their decision.
-
-Example prompt to user:
-> "I've set up AMP messaging. Would you like me to add my identity to the project's
-> CLAUDE.md so I can remember it across sessions? This will add a small section
-> documenting my AMP address."
 
 ## Protocol Reference
 
