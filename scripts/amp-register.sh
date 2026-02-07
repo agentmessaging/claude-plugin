@@ -279,12 +279,16 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
         fi
     fi
 
+    # Extract route_url from provider response (if available)
+    ROUTE_URL=$(echo "$BODY" | jq -r '.provider.route_url // empty')
+
     # Save registration
     ensure_amp_dirs
 
     jq -n \
         --arg provider "$PROVIDER_LOWER" \
         --arg apiUrl "$API_URL" \
+        --arg routeUrl "$ROUTE_URL" \
         --arg agentName "$NAME" \
         --arg tenant "$TENANT" \
         --arg address "$ADDRESS" \
@@ -296,6 +300,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
         '{
             provider: $provider,
             apiUrl: $apiUrl,
+            routeUrl: $routeUrl,
             agentName: $agentName,
             tenant: $tenant,
             address: $address,

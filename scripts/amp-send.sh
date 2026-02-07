@@ -191,6 +191,7 @@ if [ "$ROUTE" = "local" ]; then
         REGISTRATION=$(cat "$AI_MAESTRO_REG")
         API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
         API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
+        ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
 
         # Prepare API request body
         parse_address "$RECIPIENT"
@@ -218,8 +219,9 @@ if [ "$ROUTE" = "local" ]; then
                 signature: $signature
             }')
 
-        # Send via AI Maestro API
-        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/route" \
+        # Send via AI Maestro API (use route_url if available, fallback to apiUrl/route)
+        SEND_URL="${ROUTE_URL:-${API_URL}/route}"
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${SEND_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${API_KEY}" \
             -d "$API_BODY" 2>&1)
@@ -304,6 +306,7 @@ if [ "$ROUTE" = "local" ]; then
                 AUTO_AGENT_ID=$(echo "$AUTO_REG_BODY" | jq -r '.agent_id // empty')
                 AUTO_PROVIDER_NAME=$(echo "$AUTO_REG_BODY" | jq -r '.provider.name // "aimaestro.local"')
                 AUTO_PROVIDER_ENDPOINT=$(echo "$AUTO_REG_BODY" | jq -r '.provider.endpoint // empty')
+                AUTO_ROUTE_URL=$(echo "$AUTO_REG_BODY" | jq -r '.provider.route_url // empty')
                 AUTO_FINGERPRINT=$(jq -r '.fingerprint // empty' "$AMP_CONFIG" 2>/dev/null)
 
                 if [ -n "$AUTO_API_KEY" ]; then
@@ -313,6 +316,7 @@ if [ "$ROUTE" = "local" ]; then
                     jq -n \
                         --arg provider "$AUTO_PROVIDER_NAME" \
                         --arg apiUrl "${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}" \
+                        --arg routeUrl "${AUTO_ROUTE_URL:-${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}/route}" \
                         --arg agentName "$AUTO_REG_NAME" \
                         --arg tenant "$AUTO_REG_TENANT" \
                         --arg address "${AUTO_ADDRESS:-${AUTO_REG_NAME}@${AUTO_REG_TENANT}.${AMP_PROVIDER_DOMAIN}}" \
@@ -323,6 +327,7 @@ if [ "$ROUTE" = "local" ]; then
                         '{
                             provider: $provider,
                             apiUrl: $apiUrl,
+                            routeUrl: $routeUrl,
                             agentName: $agentName,
                             tenant: $tenant,
                             address: $address,
@@ -361,7 +366,8 @@ if [ "$ROUTE" = "local" ]; then
                             signature: $signature
                         }')
 
-                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}/route" \
+                    AUTO_SEND_URL="${AUTO_ROUTE_URL:-${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}/route}"
+                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${AUTO_SEND_URL}" \
                         -H "Content-Type: application/json" \
                         -H "Authorization: Bearer ${AUTO_API_KEY}" \
                         -d "$API_BODY" 2>&1)
@@ -468,6 +474,7 @@ else
     REGISTRATION=$(get_registration "$ROUTE")
     API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
     API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
+    ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
     EXTERNAL_ADDRESS=$(echo "$REGISTRATION" | jq -r '.address')
 
     # Update the 'from' address to use external address
@@ -487,8 +494,9 @@ else
     # Add signature to message
     MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg sig "$SIGNATURE" '.envelope.signature = $sig')
 
-    # Send via provider API
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/v1/route" \
+    # Send via provider API (use route_url if available, fallback to apiUrl/v1/route)
+    EXT_SEND_URL="${ROUTE_URL:-${API_URL}/v1/route}"
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${EXT_SEND_URL}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${API_KEY}" \
         -d "$MESSAGE_JSON")
