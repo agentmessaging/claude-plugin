@@ -121,12 +121,13 @@ for provider in "${PROVIDERS[@]}"; do
     # AI Maestro local providers use /messages/pending (API_URL already includes /api/v1)
     # External providers (e.g., Crabmail) use /v1/inbox
     FETCH_ENDPOINT="${API_URL}/v1/inbox"
-    if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+    if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
         FETCH_ENDPOINT="${API_URL}/messages/pending"
     fi
 
     # Fetch messages from provider
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${FETCH_ENDPOINT}" \
+    RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
+        -X GET "${FETCH_ENDPOINT}" \
         -H "Authorization: Bearer ${API_KEY}" \
         -H "Accept: application/json" 2>&1)
 
@@ -169,13 +170,43 @@ for provider in "${PROVIDERS[@]}"; do
                 continue
             fi
 
-            # Apply content security (external messages are always "external" trust level)
-            # Check if signature is present
+            # Signature verification for fetched messages
+            # - AI Maestro providers: server already verified on ingest, trust it
+            # - External providers: verify if we have the sender's public key
             signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
             sig_valid="false"
-            if [ -n "$signature" ]; then
-                # TODO: Verify signature against sender's public key
+
+            if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
+                # AI Maestro verified signatures at route time — trust the relay
                 sig_valid="true"
+            elif [ -n "$signature" ]; then
+                # External provider: attempt local verification if sender's public
+                # key is cached (e.g. from a previous registration exchange).
+                # Without the sender's key, we mark it as unverified but still accept.
+                local sender_addr
+                sender_addr=$(echo "$msg" | jq -r '.envelope.from // empty')
+                local sender_name="${sender_addr%%@*}"
+                local sender_pubkey="${AMP_AGENTS_BASE}/${sender_name}/keys/public.pem"
+
+                if [ -f "$sender_pubkey" ]; then
+                    # Reconstruct canonical signing data and verify
+                    local v_to v_subj v_pri v_reply v_phash v_sdata
+                    v_to=$(echo "$msg" | jq -r '.envelope.to // empty')
+                    v_subj=$(echo "$msg" | jq -r '.envelope.subject // empty')
+                    v_pri=$(echo "$msg" | jq -r '.envelope.priority // "normal"')
+                    v_reply=$(echo "$msg" | jq -r '.envelope.in_reply_to // ""')
+                    v_phash=$(echo "$msg" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary | base64 | tr -d '\n')
+                    v_sdata="${sender_addr}|${v_to}|${v_subj}|${v_pri}|${v_reply}|${v_phash}"
+
+                    if verify_signature "$v_sdata" "$signature" "$sender_pubkey"; then
+                        sig_valid="true"
+                    else
+                        if [ "$VERBOSE" = true ]; then
+                            echo "    ⚠️  Signature verification failed for ${msg_id}"
+                        fi
+                    fi
+                fi
+                # No public key available — accept but mark unverified
             fi
 
             # Apply security module if available
@@ -184,15 +215,17 @@ for provider in "${PROVIDERS[@]}"; do
                 msg=$(apply_content_security "$msg" "${AMP_TENANT:-default}" "$sig_valid")
             fi
 
-            # Add additional metadata
+            # Add additional metadata (including signature verification status)
             msg=$(echo "$msg" | jq \
                 --arg receivedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                 --arg provider "$provider" \
                 --arg method "fetch" \
+                --arg sigVerified "$sig_valid" \
                 '.local = (.local // {}) + {
                     received_at: $receivedAt,
                     fetched_from: $provider,
                     delivery_method: $method,
+                    signature_verified: ($sigVerified == "true"),
                     status: "unread"
                 }')
 
@@ -216,12 +249,12 @@ for provider in "${PROVIDERS[@]}"; do
             if [ "$MARK_AS_FETCHED" = true ]; then
                 # AI Maestro uses DELETE /messages/pending?id=X
                 # External providers use POST /v1/inbox/<id>/ack
-                if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
-                    curl -s -X DELETE "${API_URL}/messages/pending?id=${msg_id}" \
+                if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
+                    curl -s --connect-timeout 3 -X DELETE "${API_URL}/messages/pending?id=${msg_id}" \
                         -H "Authorization: Bearer ${API_KEY}" \
                         >/dev/null 2>&1 || true
                 else
-                    curl -s -X POST "${API_URL}/v1/inbox/${msg_id}/ack" \
+                    curl -s --connect-timeout 3 -X POST "${API_URL}/v1/inbox/${msg_id}/ack" \
                         -H "Authorization: Bearer ${API_KEY}" \
                         >/dev/null 2>&1 || true
                 fi

@@ -641,8 +641,18 @@ verify_signature() {
 # Address Parsing
 # =============================================================================
 
-# Parse AMP address: name@tenant.provider
-# Sets: ADDR_NAME, ADDR_TENANT, ADDR_PROVIDER, ADDR_IS_LOCAL
+# Parse AMP address: name@[scope.]tenant.provider
+# Sets: ADDR_NAME, ADDR_TENANT, ADDR_PROVIDER, ADDR_SCOPE, ADDR_IS_LOCAL
+#
+# Matches the server's parseAMPAddress() logic:
+#   - Provider is always the last two domain parts (e.g. "aimaestro.local", "crabmail.ai")
+#   - Tenant is the part immediately before the provider
+#   - Scope (optional) is everything before tenant
+#
+# Examples:
+#   alice@rnd23blocks.aimaestro.local → name=alice, tenant=rnd23blocks, provider=aimaestro.local
+#   bob@myrepo.github.rnd23blocks.aimaestro.local → name=bob, tenant=rnd23blocks, provider=aimaestro.local, scope=myrepo.github
+#   carol@acme.crabmail.ai → name=carol, tenant=acme, provider=crabmail.ai
 parse_address() {
     local address="$1"
 
@@ -650,6 +660,7 @@ parse_address() {
     ADDR_NAME=""
     ADDR_TENANT=""
     ADDR_PROVIDER=""
+    ADDR_SCOPE=""
     ADDR_IS_LOCAL=false
 
     # Check if it's a full address (contains @)
@@ -657,14 +668,32 @@ parse_address() {
         ADDR_NAME="${address%%@*}"
         local domain="${address#*@}"
 
-        # Check if domain has tenant.provider format
-        if [[ "$domain" == *"."* ]]; then
-            ADDR_TENANT="${domain%%.*}"
-            ADDR_PROVIDER="${domain#*.}"
-        else
+        # Split domain into parts
+        IFS='.' read -ra parts <<< "$domain"
+        local num_parts=${#parts[@]}
+
+        if [ "$num_parts" -ge 3 ]; then
+            # Provider = last 2 parts (e.g. "aimaestro.local", "crabmail.ai")
+            ADDR_PROVIDER="${parts[$((num_parts-2))]}.${parts[$((num_parts-1))]}"
+            # Tenant = part immediately before provider
+            ADDR_TENANT="${parts[$((num_parts-3))]}"
+            # Scope = everything before tenant (if any)
+            if [ "$num_parts" -gt 3 ]; then
+                local scope_parts=()
+                for ((i=0; i<num_parts-3; i++)); do
+                    scope_parts+=("${parts[$i]}")
+                done
+                ADDR_SCOPE=$(IFS='.'; echo "${scope_parts[*]}")
+            fi
+        elif [ "$num_parts" -eq 2 ]; then
+            # Two-part domain: could be "tenant.local" or bare provider
+            # Treat as tenant + single-word provider for backward compat
+            ADDR_TENANT="${parts[0]}"
+            ADDR_PROVIDER="${parts[1]}"
+        elif [ "$num_parts" -eq 1 ]; then
             # Just provider, no tenant
             ADDR_TENANT="default"
-            ADDR_PROVIDER="$domain"
+            ADDR_PROVIDER="${parts[0]}"
         fi
     else
         # Short form - just a name, use the configured tenant
@@ -681,7 +710,6 @@ parse_address() {
     fi
 
     # Check if local (aimaestro.local or legacy "local" or "default.local")
-    # This ensures backward compatibility with old address formats
     if [ "${ADDR_PROVIDER}" = "${AMP_PROVIDER_DOMAIN}" ] || \
        [ "${ADDR_PROVIDER}" = "aimaestro.local" ] || \
        [ "${ADDR_PROVIDER}" = "local" ] || \
@@ -1208,6 +1236,8 @@ require_init() {
                     _prov_name=$(echo "$_reg_body" | jq -r '.provider.name // "aimaestro.local"')
                     local _prov_endpoint
                     _prov_endpoint=$(echo "$_reg_body" | jq -r '.provider.endpoint // empty')
+                    local _prov_route_url
+                    _prov_route_url=$(echo "$_reg_body" | jq -r '.provider.route_url // empty')
                     local _reg_address
                     _reg_address=$(echo "$_reg_body" | jq -r '.address // empty')
                     local _reg_agent_id
@@ -1216,6 +1246,7 @@ require_init() {
                     jq -n \
                         --arg provider "$_prov_name" \
                         --arg apiUrl "${_prov_endpoint:-${AMP_MAESTRO_URL}/api/v1}" \
+                        --arg routeUrl "${_prov_route_url:-${_prov_endpoint:-${AMP_MAESTRO_URL}/api/v1}/route}" \
                         --arg agentName "$_agent_name" \
                         --arg tenant "$_tenant" \
                         --arg address "${_reg_address:-$_address}" \
@@ -1224,10 +1255,10 @@ require_init() {
                         --arg fingerprint "$_fingerprint" \
                         --arg registeredAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                         '{
-                            provider: $provider, apiUrl: $apiUrl, agentName: $agentName,
-                            tenant: $tenant, address: $address, apiKey: $apiKey,
-                            providerAgentId: $providerAgentId, fingerprint: $fingerprint,
-                            registeredAt: $registeredAt
+                            provider: $provider, apiUrl: $apiUrl, routeUrl: $routeUrl,
+                            agentName: $agentName, tenant: $tenant, address: $address,
+                            apiKey: $apiKey, providerAgentId: $providerAgentId,
+                            fingerprint: $fingerprint, registeredAt: $registeredAt
                         }' > "${AMP_REGISTRATIONS_DIR}/${_prov_name}.json"
                     chmod 600 "${AMP_REGISTRATIONS_DIR}/${_prov_name}.json"
                     echo "  ✅ AMP identity registered for ${_agent_name}" >&2

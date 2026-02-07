@@ -163,22 +163,110 @@ SIGNATURE=$(sign_message "$SIGN_DATA")
 MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg sig "$SIGNATURE" '.envelope.signature = $sig')
 
 # =============================================================================
+# Helper: Send via AMP provider API
+# =============================================================================
+# Builds the flat API body, sends with timeouts, handles response.
+# Used by both the registered and auto-registered code paths.
+#
+# Args: $1=send_url  $2=api_key  $3=full_recipient  $4=label (for display)
+# Exits 0 on success, 1 on failure.
+send_via_api() {
+    local send_url="$1"
+    local api_key="$2"
+    local full_recipient="$3"
+    local label="${4:-AMP routing}"
+
+    local api_body
+    api_body=$(jq -n \
+        --arg to "$full_recipient" \
+        --arg subject "$SUBJECT" \
+        --arg priority "$PRIORITY" \
+        --arg type "$TYPE" \
+        --arg message "$MESSAGE" \
+        --arg in_reply_to "$REPLY_TO" \
+        --argjson context "$CONTEXT" \
+        --arg signature "$SIGNATURE" \
+        '{
+            to: $to,
+            subject: $subject,
+            priority: $priority,
+            payload: {
+                type: $type,
+                message: $message,
+                context: $context
+            },
+            in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
+            signature: $signature
+        }')
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
+        -X POST "${send_url}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${api_key}" \
+        -d "$api_body" 2>&1)
+
+    local http_code
+    http_code=$(echo "$response" | tail -n1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "202" ]; then
+        save_to_sent "$MESSAGE_JSON" >/dev/null
+
+        local msg_id
+        msg_id=$(echo "$body" | jq -r '.id // empty')
+        [ -z "$msg_id" ] && msg_id=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+        local delivery_status
+        delivery_status=$(echo "$body" | jq -r '.status // "sent"')
+        local delivery_method
+        delivery_method=$(echo "$body" | jq -r '.method // "api"')
+
+        echo "✅ Message sent via ${label}"
+        echo ""
+        echo "  To:       ${full_recipient}"
+        echo "  Subject:  ${SUBJECT}"
+        echo "  Priority: ${PRIORITY}"
+        echo "  Type:     ${TYPE}"
+        echo "  ID:       ${msg_id}"
+        echo "  Status:   ${delivery_status}"
+        echo "  Method:   ${delivery_method}"
+        return 0
+    else
+        echo "❌ Failed to send via ${label} (HTTP ${http_code})"
+        local error_msg
+        error_msg=$(echo "$body" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
+        if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+            echo "   Error: ${error_msg}"
+        fi
+        return 1
+    fi
+}
+
+# =============================================================================
+# Helper: Check if a registration file is for the local AI Maestro provider
+# =============================================================================
+is_aimaestro_registration() {
+    local provider_name="$1"
+    # Exact match on known AI Maestro provider names
+    [ "$provider_name" = "aimaestro.local" ] || \
+    [ "$provider_name" = "${AMP_PROVIDER_DOMAIN}" ]
+}
+
+# =============================================================================
 # Routing Decision
 # =============================================================================
-# For "local" routes, check if we're registered with AI Maestro provider
-# If so, use the API for proper mesh routing; otherwise, fall back to filesystem
+# For "local" routes, check if we're registered with AI Maestro provider.
+# If so, use the API for proper mesh routing; otherwise, fall back to filesystem.
 
 if [ "$ROUTE" = "local" ]; then
-    # Check if registered with local AI Maestro provider
-    # This enables proper mesh routing across hosts
-    LOCAL_PROVIDER="${AMP_PROVIDER_DOMAIN}"
-
     # Try to find AI Maestro registration
     AI_MAESTRO_REG=""
     for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
         [ -f "$provider_file" ] || continue
         provider=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
-        if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+        if is_aimaestro_registration "$provider"; then
             AI_MAESTRO_REG="$provider_file"
             break
         fi
@@ -193,78 +281,16 @@ if [ "$ROUTE" = "local" ]; then
         API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
         ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
 
-        # Prepare API request body
         parse_address "$RECIPIENT"
         FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
 
-        API_BODY=$(jq -n \
-            --arg to "$FULL_RECIPIENT" \
-            --arg subject "$SUBJECT" \
-            --arg priority "$PRIORITY" \
-            --arg type "$TYPE" \
-            --arg message "$MESSAGE" \
-            --arg in_reply_to "$REPLY_TO" \
-            --argjson context "$CONTEXT" \
-            --arg signature "$SIGNATURE" \
-            '{
-                to: $to,
-                subject: $subject,
-                priority: $priority,
-                payload: {
-                    type: $type,
-                    message: $message,
-                    context: $context
-                },
-                in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
-                signature: $signature
-            }')
-
-        # Send via AI Maestro API (use route_url if available, fallback to apiUrl/route)
         SEND_URL="${ROUTE_URL:-${API_URL}/route}"
-        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${SEND_URL}" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${API_KEY}" \
-            -d "$API_BODY" 2>&1)
-
-        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-        BODY=$(echo "$RESPONSE" | sed '$d')
-
-        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-            # Save to sent folder
-            save_to_sent "$MESSAGE_JSON" >/dev/null
-
-            MSG_ID=$(echo "$BODY" | jq -r '.id // empty')
-            [ -z "$MSG_ID" ] && MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
-
-            DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "sent"')
-            DELIVERY_METHOD=$(echo "$BODY" | jq -r '.method // "api"')
-
-            echo "✅ Message sent via AMP routing"
-            echo ""
-            echo "  To:       ${FULL_RECIPIENT}"
-            echo "  Subject:  ${SUBJECT}"
-            echo "  Priority: ${PRIORITY}"
-            echo "  Type:     ${TYPE}"
-            echo "  ID:       ${MSG_ID}"
-            echo "  Status:   ${DELIVERY_STATUS}"
-            echo "  Method:   ${DELIVERY_METHOD}"
-        else
-            echo "❌ Failed to send via AMP routing (HTTP ${HTTP_CODE})"
-            ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
-            if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
-                echo "   Error: ${ERROR_MSG}"
-            fi
-            exit 1
-        fi
+        send_via_api "$SEND_URL" "$API_KEY" "$FULL_RECIPIENT" "AMP routing" || exit 1
 
     else
         # ==========================================================================
         # No AI Maestro registration found — attempt auto-registration
         # ==========================================================================
-        # Instead of silently falling back to filesystem (which only works on the
-        # same machine), try to register with AI Maestro first so cross-host
-        # delivery works automatically.
-
         echo "  No AMP registration found. Auto-registering..."
 
         # Read agent's public key
@@ -340,67 +366,12 @@ if [ "$ROUTE" = "local" ]; then
                     echo "  ✅ AMP identity registered"
                     AUTO_REG_SUCCESS=true
 
-                    # Now send via AI Maestro API (same logic as the registered path)
+                    # Send via the newly-registered provider
                     parse_address "$RECIPIENT"
                     FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
 
-                    API_BODY=$(jq -n \
-                        --arg to "$FULL_RECIPIENT" \
-                        --arg subject "$SUBJECT" \
-                        --arg priority "$PRIORITY" \
-                        --arg type "$TYPE" \
-                        --arg message "$MESSAGE" \
-                        --arg in_reply_to "$REPLY_TO" \
-                        --argjson context "$CONTEXT" \
-                        --arg signature "$SIGNATURE" \
-                        '{
-                            to: $to,
-                            subject: $subject,
-                            priority: $priority,
-                            payload: {
-                                type: $type,
-                                message: $message,
-                                context: $context
-                            },
-                            in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
-                            signature: $signature
-                        }')
-
                     AUTO_SEND_URL="${AUTO_ROUTE_URL:-${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}/route}"
-                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${AUTO_SEND_URL}" \
-                        -H "Content-Type: application/json" \
-                        -H "Authorization: Bearer ${AUTO_API_KEY}" \
-                        -d "$API_BODY" 2>&1)
-
-                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-                    BODY=$(echo "$RESPONSE" | sed '$d')
-
-                    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-                        save_to_sent "$MESSAGE_JSON" >/dev/null
-
-                        MSG_ID=$(echo "$BODY" | jq -r '.id // empty')
-                        [ -z "$MSG_ID" ] && MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
-
-                        DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "sent"')
-                        DELIVERY_METHOD=$(echo "$BODY" | jq -r '.method // "api"')
-
-                        echo "✅ Message sent via AMP routing (auto-registered)"
-                        echo ""
-                        echo "  To:       ${FULL_RECIPIENT}"
-                        echo "  Subject:  ${SUBJECT}"
-                        echo "  Priority: ${PRIORITY}"
-                        echo "  Type:     ${TYPE}"
-                        echo "  ID:       ${MSG_ID}"
-                        echo "  Status:   ${DELIVERY_STATUS}"
-                        echo "  Method:   ${DELIVERY_METHOD}"
-                    else
-                        echo "❌ Failed to send via AMP after auto-registration (HTTP ${HTTP_CODE})"
-                        ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
-                        if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
-                            echo "   Error: ${ERROR_MSG}"
-                        fi
-                        exit 1
-                    fi
+                    send_via_api "$AUTO_SEND_URL" "$AUTO_API_KEY" "$FULL_RECIPIENT" "AMP routing (auto-registered)" || exit 1
                 fi
             elif [ "$AUTO_REG_HTTP" = "409" ]; then
                 echo "  ⚠️  AMP identity already registered but local config is missing."
@@ -441,7 +412,6 @@ if [ "$ROUTE" = "local" ]; then
                 echo "  ID:       ${MSG_ID}"
             else
                 # Recipient NOT on this machine AND no AMP registration
-                # FAIL instead of silently losing the message
                 echo "❌ Cannot deliver message to '${FULL_RECIPIENT}'"
                 echo ""
                 echo "  The recipient '${ADDR_NAME}' was not found on this machine,"
@@ -460,6 +430,9 @@ else
     # ==========================================================================
     # External Delivery (via provider)
     # ==========================================================================
+    # External providers use the full AMP envelope format (not the flat body
+    # used by AI Maestro's /api/v1/route). The message is re-signed with the
+    # agent's external address before sending.
 
     # Check if registered with this provider
     if ! is_registered "$ROUTE"; then
@@ -494,9 +467,10 @@ else
     # Add signature to message
     MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg sig "$SIGNATURE" '.envelope.signature = $sig')
 
-    # Send via provider API (use route_url if available, fallback to apiUrl/v1/route)
+    # Send full AMP envelope to external provider
     EXT_SEND_URL="${ROUTE_URL:-${API_URL}/v1/route}"
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${EXT_SEND_URL}" \
+    RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
+        -X POST "${EXT_SEND_URL}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${API_KEY}" \
         -d "$MESSAGE_JSON")
