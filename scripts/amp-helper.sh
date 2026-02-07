@@ -507,6 +507,24 @@ load_config() {
         return 1
     fi
 
+    # ── Name mismatch detection ──
+    # If the config name doesn't match the AMP_DIR directory name, the config
+    # was likely poisoned by a bad amp-init (e.g. git repo name fallback).
+    # Auto-fix: update the config to match the directory (the directory name
+    # comes from CLAUDE_AGENT_NAME or tmux, which are authoritative).
+    local _expected_name
+    _expected_name=$(basename "$AMP_DIR")
+    if [ -n "$_expected_name" ] && [ "$AMP_AGENT_NAME" != "$_expected_name" ]; then
+        echo "  ⚠️  AMP name mismatch: config='${AMP_AGENT_NAME}' dir='${_expected_name}'" >&2
+        echo "  Auto-fixing config to match agent directory..." >&2
+        # Re-save config with the correct name
+        local _new_address
+        _new_address=$(save_config "$_expected_name" "$AMP_TENANT" "$AMP_FINGERPRINT")
+        AMP_AGENT_NAME="$_expected_name"
+        AMP_ADDRESS="$_new_address"
+        echo "  ✅ Fixed: name='${AMP_AGENT_NAME}' address='${AMP_ADDRESS}'" >&2
+    fi
+
     return 0
 }
 
@@ -1152,18 +1170,11 @@ detect_agent_name() {
         fi
     fi
 
-    # 3. Check git repo name
-    if command -v git &>/dev/null; then
-        local repo_name
-        repo_name=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)
-        if [ -n "$repo_name" ]; then
-            echo "$repo_name"
-            return 0
-        fi
-    fi
-
-    # 4. Fallback to hostname + user
-    echo "$(whoami)-$(hostname -s | tr '[:upper:]' '[:lower:]')"
+    # 3. Fallback: error out — do NOT use git repo name or hostname
+    #    Using git repo name (e.g. "agents-web") would silently poison
+    #    the agent's config with a wrong identity. Better to fail loudly.
+    echo ""
+    return 1
 }
 
 # =============================================================================

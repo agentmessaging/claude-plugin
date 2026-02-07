@@ -109,7 +109,12 @@ fi
 # Get name
 if [ -z "$NAME" ]; then
     if [ "$AUTO_DETECT" = true ]; then
-        NAME=$(detect_agent_name)
+        NAME=$(detect_agent_name) || true
+        if [ -z "$NAME" ]; then
+            echo "Error: Cannot auto-detect agent name." >&2
+            echo "Set CLAUDE_AGENT_NAME, run inside tmux, or use --name <name>." >&2
+            exit 1
+        fi
         echo "Auto-detected agent name: ${NAME}"
     else
         # Interactive mode
@@ -118,11 +123,19 @@ if [ -z "$NAME" ]; then
         echo ""
 
         # Suggest a name
-        SUGGESTED=$(detect_agent_name)
-        echo "Enter your agent name (or press Enter for '${SUGGESTED}'):"
+        SUGGESTED=$(detect_agent_name) || true
+        if [ -n "$SUGGESTED" ]; then
+            echo "Enter your agent name (or press Enter for '${SUGGESTED}'):"
+        else
+            echo "Enter your agent name:"
+        fi
         read -r NAME
-        if [ -z "$NAME" ]; then
+        if [ -z "$NAME" ] && [ -n "$SUGGESTED" ]; then
             NAME="$SUGGESTED"
+        fi
+        if [ -z "$NAME" ]; then
+            echo "Error: Agent name is required."
+            exit 1
         fi
     fi
 fi

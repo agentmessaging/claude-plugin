@@ -299,9 +299,9 @@ if [ "$ROUTE" = "local" ]; then
             AUTO_REG_PUBLIC_KEY=$(cat "${AMP_KEYS_DIR}/public.pem")
         fi
 
-        # Read agent name and tenant from config
-        AUTO_REG_NAME=$(jq -r '.name // empty' "$AMP_CONFIG" 2>/dev/null)
-        AUTO_REG_TENANT=$(jq -r '.tenant // "default"' "$AMP_CONFIG" 2>/dev/null)
+        # Read agent name and tenant from config (nested under .agent)
+        AUTO_REG_NAME=$(jq -r '.agent.name // .name // empty' "$AMP_CONFIG" 2>/dev/null)
+        AUTO_REG_TENANT=$(jq -r '.agent.tenant // .tenant // "default"' "$AMP_CONFIG" 2>/dev/null)
 
         AUTO_REG_SUCCESS=false
 
