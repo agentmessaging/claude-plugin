@@ -333,7 +333,7 @@ if [ "$ROUTE" = "local" ]; then
                 AUTO_PROVIDER_NAME=$(echo "$AUTO_REG_BODY" | jq -r '.provider.name // "aimaestro.local"')
                 AUTO_PROVIDER_ENDPOINT=$(echo "$AUTO_REG_BODY" | jq -r '.provider.endpoint // empty')
                 AUTO_ROUTE_URL=$(echo "$AUTO_REG_BODY" | jq -r '.provider.route_url // empty')
-                AUTO_FINGERPRINT=$(jq -r '.fingerprint // empty' "$AMP_CONFIG" 2>/dev/null)
+                AUTO_FINGERPRINT=$(jq -r '.agent.fingerprint // .fingerprint // empty' "$AMP_CONFIG" 2>/dev/null)
 
                 if [ -n "$AUTO_API_KEY" ]; then
                     ensure_amp_dirs
@@ -385,7 +385,17 @@ if [ "$ROUTE" = "local" ]; then
             FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
 
             AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
-            RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
+            # Look up recipient UUID from .index.json
+            AMP_INDEX_FILE="${AGENTS_BASE_DIR}/.index.json"
+            RECIPIENT_UUID=""
+            if [ -f "$AMP_INDEX_FILE" ]; then
+                RECIPIENT_UUID=$(jq -r --arg name "$ADDR_NAME" '.[$name] // empty' "$AMP_INDEX_FILE" 2>/dev/null)
+            fi
+            if [ -n "$RECIPIENT_UUID" ]; then
+                RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${RECIPIENT_UUID}"
+            else
+                RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
+            fi
 
             if [ -d "${RECIPIENT_AMP_DIR}" ]; then
                 # Recipient IS on this machine - filesystem delivery is valid

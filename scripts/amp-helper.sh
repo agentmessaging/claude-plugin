@@ -80,44 +80,77 @@ fi
 # Configuration
 #
 # Per-Agent Isolation:
-#   Each agent gets its own AMP directory at ~/.agent-messaging/agents/<name>/
-#   This ensures inboxes, sent folders, keys, and config are completely isolated.
+#   Each agent gets its own AMP directory at ~/.agent-messaging/agents/<uuid>/
+#   with a name symlink: ~/.agent-messaging/agents/<name> -> <uuid>
+#   This ensures inboxes, sent folders, keys, and config are completely isolated
+#   and survive agent renames.
 #
 # Resolution order for AMP_DIR:
 #   1. Explicit AMP_DIR env var (set by AI Maestro wake/create routes)
-#   2. Auto-detect from agent name → ~/.agent-messaging/agents/<name>/
+#   2. CLAUDE_AGENT_ID env var → ~/.agent-messaging/agents/<uuid>/
+#   3. CLAUDE_AGENT_NAME env var → ~/.agent-messaging/agents/<name>/
+#      (symlink resolves to UUID dir if migrated)
+#   4. tmux session name → ~/.agent-messaging/agents/<name>/
 #      If the directory doesn't exist, it is auto-created.
 #
 AMP_AGENTS_BASE="${HOME}/.agent-messaging/agents"
 
 if [ -z "${AMP_DIR:-}" ]; then
-    _amp_agent_name=""
+    _amp_resolved=false
 
-    # Try CLAUDE_AGENT_NAME env var first (set by AI Maestro per-session)
-    if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
-        _amp_agent_name="${CLAUDE_AGENT_NAME}"
-    # Fallback: tmux session name (strip _N multi-session suffix)
-    elif [ -n "${TMUX:-}" ]; then
-        _amp_agent_name=$(tmux display-message -p '#S' 2>/dev/null || true)
-        _amp_agent_name="${_amp_agent_name%_[0-9]*}"
+    # Priority 1: UUID (set by AI Maestro wake/create routes)
+    if [ -n "${CLAUDE_AGENT_ID:-}" ]; then
+        AMP_DIR="${AMP_AGENTS_BASE}/${CLAUDE_AGENT_ID}"
+        _amp_resolved=true
     fi
 
-    if [ -n "$_amp_agent_name" ]; then
-        AMP_DIR="${AMP_AGENTS_BASE}/${_amp_agent_name}"
-        # Auto-create per-agent directory if it doesn't exist
-        if [ ! -d "$AMP_DIR" ]; then
-            mkdir -p "${AMP_DIR}/keys"
-            mkdir -p "${AMP_DIR}/messages/inbox"
-            mkdir -p "${AMP_DIR}/messages/sent"
-            mkdir -p "${AMP_DIR}/registrations"
-            chmod 700 "${AMP_DIR}/keys"
+    # Priority 2: Agent name → look up UUID from .index.json
+    if [ "$_amp_resolved" = false ]; then
+        _amp_agent_name=""
+
+        # Try CLAUDE_AGENT_NAME env var (set by AI Maestro per-session)
+        if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
+            _amp_agent_name="${CLAUDE_AGENT_NAME}"
+        # Fallback: tmux session name (strip _N multi-session suffix)
+        elif [ -n "${TMUX:-}" ]; then
+            _amp_agent_name=$(tmux display-message -p '#S' 2>/dev/null || true)
+            _amp_agent_name="${_amp_agent_name%_[0-9]*}"
         fi
-    else
+
+        if [ -n "$_amp_agent_name" ]; then
+            # Look up UUID from name→UUID index
+            _amp_index_file="${AMP_AGENTS_BASE}/.index.json"
+            _amp_uuid=""
+            if [ -f "$_amp_index_file" ]; then
+                _amp_uuid=$(jq -r --arg name "$_amp_agent_name" '.[$name] // empty' "$_amp_index_file" 2>/dev/null)
+            fi
+            if [ -n "$_amp_uuid" ]; then
+                AMP_DIR="${AMP_AGENTS_BASE}/${_amp_uuid}"
+            else
+                # Fallback: legacy name-based dir (pre-migration)
+                AMP_DIR="${AMP_AGENTS_BASE}/${_amp_agent_name}"
+            fi
+            _amp_resolved=true
+        fi
+        unset _amp_agent_name _amp_index_file _amp_uuid
+    fi
+
+    if [ "$_amp_resolved" = false ]; then
         echo "Error: Cannot determine agent name." >&2
-        echo "Set CLAUDE_AGENT_NAME or run inside a tmux session." >&2
+        echo "Set CLAUDE_AGENT_ID, CLAUDE_AGENT_NAME, or run inside a tmux session." >&2
         exit 1
     fi
-    unset _amp_agent_name
+    unset _amp_resolved
+
+    # Auto-create per-agent directory if it doesn't exist
+    # (symlinks resolve transparently — if AMP_DIR is a symlink, -d follows it)
+    if [ ! -d "$AMP_DIR" ]; then
+        mkdir -p "${AMP_DIR}/keys"
+        mkdir -p "${AMP_DIR}/messages/inbox"
+        mkdir -p "${AMP_DIR}/messages/sent"
+        mkdir -p "${AMP_DIR}/registrations"
+        chmod 700 "${AMP_DIR}/keys"
+    fi
 fi
 
 AMP_CONFIG="${AMP_DIR}/config.json"
@@ -512,18 +545,34 @@ load_config() {
     fi
 
     # ── Name & address mismatch detection ──
-    # If the config name OR address doesn't match the AMP_DIR directory name,
+    # If the config name OR address doesn't match the expected agent name,
     # the config was likely poisoned by a bad amp-init (e.g. git repo name
-    # fallback). Auto-fix: update the config to match the directory (the
-    # directory name comes from CLAUDE_AGENT_NAME or tmux, which are
-    # authoritative).
+    # fallback). Auto-fix: update the config to match the authoritative name.
+    #
+    # The expected name comes from (in priority order):
+    #   1. CLAUDE_AGENT_NAME env var (set by AI Maestro)
+    #   2. Directory basename (only if it's NOT a UUID — UUID dirs are stable,
+    #      the name lives in config.json)
     local _expected_name _addr_local_part _needs_fix=false
-    _expected_name=$(basename "$AMP_DIR")
+    _expected_name=""
+
+    # If CLAUDE_AGENT_NAME is set, it's authoritative
+    if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
+        _expected_name="${CLAUDE_AGENT_NAME}"
+    else
+        # Use directory basename only if it doesn't look like a UUID
+        local _dir_basename
+        _dir_basename=$(basename "$AMP_DIR")
+        if [[ ! "$_dir_basename" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            _expected_name="$_dir_basename"
+        fi
+    fi
+
     _addr_local_part="${AMP_ADDRESS%%@*}"
 
     if [ -n "$_expected_name" ]; then
         if [ "$AMP_AGENT_NAME" != "$_expected_name" ]; then
-            echo "  ⚠️  AMP name mismatch: config='${AMP_AGENT_NAME}' dir='${_expected_name}'" >&2
+            echo "  ⚠️  AMP name mismatch: config='${AMP_AGENT_NAME}' expected='${_expected_name}'" >&2
             _needs_fix=true
         elif [ "$_addr_local_part" != "$_expected_name" ]; then
             echo "  ⚠️  AMP address mismatch: address='${AMP_ADDRESS}' expected='${_expected_name}@...'" >&2
@@ -531,7 +580,7 @@ load_config() {
         fi
 
         if [ "$_needs_fix" = true ]; then
-            echo "  Auto-fixing config to match agent directory..." >&2
+            echo "  Auto-fixing config to match agent identity..." >&2
             local _new_address
             _new_address=$(save_config "$_expected_name" "$AMP_TENANT" "$AMP_FINGERPRINT")
             AMP_AGENT_NAME="$_expected_name"

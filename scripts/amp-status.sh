@@ -66,8 +66,11 @@ SENT_COUNT=0
 if [ -d "$AMP_INBOX_DIR" ]; then
     # Count all .json files recursively (handles nested sender directories)
     INBOX_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
-    # Count unread messages - check both .local.status and .metadata.status
-    UNREAD_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" -type f -exec grep -l '"status"[[:space:]]*:[[:space:]]*"unread"' {} \; 2>/dev/null | wc -l | tr -d ' ')
+    # Count unread messages - check .local.status, .metadata.status, and top-level .status via jq
+    UNREAD_COUNT=$(find "$AMP_INBOX_DIR" -name "*.json" -type f 2>/dev/null | while read -r f; do
+        status=$(jq -r '(.local.status // .metadata.status // .status // "unread")' "$f" 2>/dev/null)
+        [ "$status" = "unread" ] && echo 1
+    done | wc -l | tr -d ' ')
 fi
 
 if [ -d "$AMP_SENT_DIR" ]; then

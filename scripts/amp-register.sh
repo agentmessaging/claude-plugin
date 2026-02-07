@@ -318,6 +318,21 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     echo "Updating identity file..."
     update_identity_file > /dev/null
 
+    # Add AMP address to agent's collection via AI Maestro API (best-effort)
+    MAESTRO_AGENT_ID=$(jq -r '.agent.id // empty' "$AMP_CONFIG" 2>/dev/null)
+    AMP_MAESTRO_CALLBACK="${AMP_MAESTRO_URL:-}"
+    if [ -n "$MAESTRO_AGENT_ID" ] && [ -n "$AMP_MAESTRO_CALLBACK" ]; then
+        curl -s -X POST "${AMP_MAESTRO_CALLBACK}/api/agents/${MAESTRO_AGENT_ID}/amp/addresses" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg address "$ADDRESS" \
+                --arg provider "$PROVIDER_LOWER" \
+                --arg type "cloud" \
+                --arg tenant "$TENANT" \
+                '{address:$address,provider:$provider,type:$type,tenant:$tenant}')" \
+            >/dev/null 2>&1 || true
+    fi
+
     echo ""
     echo "✅ Registration successful!"
     echo ""

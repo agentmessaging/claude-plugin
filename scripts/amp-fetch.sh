@@ -185,7 +185,17 @@ for provider in "${PROVIDERS[@]}"; do
                 # Without the sender's key, we mark it as unverified but still accept.
                 sender_addr=$(echo "$msg" | jq -r '.envelope.from // empty')
                 sender_name="${sender_addr%%@*}"
-                sender_pubkey="${AMP_AGENTS_BASE}/${sender_name}/keys/public.pem"
+                # Look up sender UUID from .index.json for key resolution
+                _sender_uuid=""
+                _amp_index="${AMP_AGENTS_BASE}/.index.json"
+                if [ -f "$_amp_index" ]; then
+                    _sender_uuid=$(jq -r --arg name "$sender_name" '.[$name] // empty' "$_amp_index" 2>/dev/null)
+                fi
+                if [ -n "$_sender_uuid" ]; then
+                    sender_pubkey="${AMP_AGENTS_BASE}/${_sender_uuid}/keys/public.pem"
+                else
+                    sender_pubkey="${AMP_AGENTS_BASE}/${sender_name}/keys/public.pem"
+                fi
 
                 if [ -f "$sender_pubkey" ]; then
                     # Reconstruct canonical signing data and verify
