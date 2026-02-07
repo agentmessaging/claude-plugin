@@ -78,35 +78,40 @@ fi
 # Per-Agent Isolation:
 #   Each agent gets its own AMP directory at ~/.agent-messaging/agents/<name>/
 #   This ensures inboxes, sent folders, keys, and config are completely isolated.
-#   The shared ~/.agent-messaging/ is only used as a legacy fallback.
 #
 # Resolution order for AMP_DIR:
 #   1. Explicit AMP_DIR env var (set by AI Maestro wake/create routes)
 #   2. Auto-detect from agent name → ~/.agent-messaging/agents/<name>/
-#   3. Fallback to shared ~/.agent-messaging/ (legacy, not recommended)
+#      If the directory doesn't exist, it is auto-created.
 #
 AMP_AGENTS_BASE="${HOME}/.agent-messaging/agents"
 
 if [ -z "${AMP_DIR:-}" ]; then
-    # AMP_DIR not explicitly set - try to auto-resolve per-agent directory
     _amp_agent_name=""
 
-    # Try CLAUDE_AGENT_NAME env var first (fastest)
+    # Try CLAUDE_AGENT_NAME env var first (set by AI Maestro per-session)
     if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
         _amp_agent_name="${CLAUDE_AGENT_NAME}"
-    # Try tmux session name
+    # Fallback: tmux session name (strip _N multi-session suffix)
     elif [ -n "${TMUX:-}" ]; then
         _amp_agent_name=$(tmux display-message -p '#S' 2>/dev/null || true)
-        # Remove any _N suffix (multi-session pattern)
         _amp_agent_name="${_amp_agent_name%_[0-9]*}"
     fi
 
-    # If we have an agent name and its per-agent dir exists, use it
-    if [ -n "$_amp_agent_name" ] && [ -d "${AMP_AGENTS_BASE}/${_amp_agent_name}" ]; then
+    if [ -n "$_amp_agent_name" ]; then
         AMP_DIR="${AMP_AGENTS_BASE}/${_amp_agent_name}"
+        # Auto-create per-agent directory if it doesn't exist
+        if [ ! -d "$AMP_DIR" ]; then
+            mkdir -p "${AMP_DIR}/keys"
+            mkdir -p "${AMP_DIR}/messages/inbox"
+            mkdir -p "${AMP_DIR}/messages/sent"
+            mkdir -p "${AMP_DIR}/registrations"
+            chmod 700 "${AMP_DIR}/keys"
+        fi
     else
-        # Legacy fallback to shared directory
-        AMP_DIR="${HOME}/.agent-messaging"
+        echo "Error: Cannot determine agent name." >&2
+        echo "Set CLAUDE_AGENT_NAME or run inside a tmux session." >&2
+        exit 1
     fi
     unset _amp_agent_name
 fi
@@ -123,8 +128,6 @@ AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
 
 # Provider domain (AMP v1)
 AMP_PROVIDER_DOMAIN="aimaestro.local"
-
-# Default local domain (legacy, use AMP_PROVIDER_DOMAIN instead)
 AMP_LOCAL_DOMAIN="${AMP_PROVIDER_DOMAIN}"
 
 # =============================================================================
@@ -1141,11 +1144,96 @@ detect_agent_name() {
 
 require_init() {
     if ! is_initialized; then
-        echo "Error: AMP not initialized." >&2
-        echo "" >&2
-        echo "Run 'amp-init' to set up your agent identity." >&2
-        echo "Or run 'amp-init --auto' to auto-detect your agent name." >&2
-        exit 1
+        # Auto-initialize: generate keys, save config, register
+        local _agent_name=""
+        if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
+            _agent_name="${CLAUDE_AGENT_NAME}"
+        elif [ -n "${TMUX:-}" ]; then
+            _agent_name=$(tmux display-message -p '#S' 2>/dev/null || true)
+            _agent_name="${_agent_name%_[0-9]*}"
+        fi
+
+        if [ -z "$_agent_name" ]; then
+            echo "Error: Cannot determine agent name for auto-init." >&2
+            echo "Set CLAUDE_AGENT_NAME or run inside a tmux session." >&2
+            exit 1
+        fi
+
+        echo "  Auto-initializing AMP identity for ${_agent_name}..." >&2
+
+        # Get organization
+        local _tenant
+        _tenant=$(get_organization 2>/dev/null) || true
+        [ -z "$_tenant" ] && _tenant="default"
+
+        # Generate keypair
+        local _fingerprint
+        _fingerprint=$(generate_keypair)
+
+        # Save config
+        save_config "$_agent_name" "$_tenant" "$_fingerprint" >/dev/null
+
+        # Create identity file
+        local _address="${_agent_name}@${_tenant}.${AMP_PROVIDER_DOMAIN}"
+        create_identity_file "$_agent_name" "$_tenant" "$_address" "$_fingerprint" >/dev/null 2>&1 || true
+
+        # Auto-register with AMP provider
+        local _pub_key=""
+        [ -f "${AMP_KEYS_DIR}/public.pem" ] && _pub_key=$(cat "${AMP_KEYS_DIR}/public.pem")
+
+        if [ -n "$_pub_key" ]; then
+            local _reg_req
+            _reg_req=$(jq -n \
+                --arg name "$_agent_name" \
+                --arg tenant "$_tenant" \
+                --arg publicKey "$_pub_key" \
+                '{ name: $name, tenant: $tenant, public_key: $publicKey, key_algorithm: "Ed25519" }')
+
+            local _reg_resp
+            _reg_resp=$(curl -s -w "\n%{http_code}" --connect-timeout 3 -X POST \
+                "${AMP_MAESTRO_URL}/api/v1/register" \
+                -H "Content-Type: application/json" \
+                -d "$_reg_req" 2>&1) || true
+
+            local _reg_http
+            _reg_http=$(echo "$_reg_resp" | tail -n1)
+            local _reg_body
+            _reg_body=$(echo "$_reg_resp" | sed '$d')
+
+            if [ "$_reg_http" = "200" ] || [ "$_reg_http" = "201" ]; then
+                local _api_key
+                _api_key=$(echo "$_reg_body" | jq -r '.api_key // empty')
+                if [ -n "$_api_key" ]; then
+                    local _prov_name
+                    _prov_name=$(echo "$_reg_body" | jq -r '.provider.name // "aimaestro.local"')
+                    local _prov_endpoint
+                    _prov_endpoint=$(echo "$_reg_body" | jq -r '.provider.endpoint // empty')
+                    local _reg_address
+                    _reg_address=$(echo "$_reg_body" | jq -r '.address // empty')
+                    local _reg_agent_id
+                    _reg_agent_id=$(echo "$_reg_body" | jq -r '.agent_id // empty')
+
+                    jq -n \
+                        --arg provider "$_prov_name" \
+                        --arg apiUrl "${_prov_endpoint:-${AMP_MAESTRO_URL}/api/v1}" \
+                        --arg agentName "$_agent_name" \
+                        --arg tenant "$_tenant" \
+                        --arg address "${_reg_address:-$_address}" \
+                        --arg apiKey "$_api_key" \
+                        --arg providerAgentId "$_reg_agent_id" \
+                        --arg fingerprint "$_fingerprint" \
+                        --arg registeredAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                        '{
+                            provider: $provider, apiUrl: $apiUrl, agentName: $agentName,
+                            tenant: $tenant, address: $address, apiKey: $apiKey,
+                            providerAgentId: $providerAgentId, fingerprint: $fingerprint,
+                            registeredAt: $registeredAt
+                        }' > "${AMP_REGISTRATIONS_DIR}/${_prov_name}.json"
+                    chmod 600 "${AMP_REGISTRATIONS_DIR}/${_prov_name}.json"
+                    echo "  ✅ AMP identity registered for ${_agent_name}" >&2
+                fi
+            fi
+        fi
     fi
 
     load_config
