@@ -151,7 +151,7 @@ MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIOR
 #
 # Use jq -c for compact JSON (same as JSON.stringify in Node.js)
 # Note: jq adds a trailing newline, so we remove it with tr before hashing
-PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | openssl dgst -sha256 -binary | base64 | tr -d '\n')
+PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary | base64 | tr -d '\n')
 FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
 TO_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.to')
 SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
@@ -333,7 +333,7 @@ else
     EXT_SUBJ=$(echo "$MESSAGE_JSON" | jq -r '.envelope.subject')
     EXT_PRIORITY=$(echo "$MESSAGE_JSON" | jq -r '.envelope.priority // "normal"')
     EXT_REPLY_TO=$(echo "$MESSAGE_JSON" | jq -r '.payload.in_reply_to // ""')
-    EXT_PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | openssl dgst -sha256 -binary | base64 | tr -d '\n')
+    EXT_PAYLOAD_HASH=$(echo "$MESSAGE_JSON" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary | base64 | tr -d '\n')
     SIGN_DATA="${EXT_FROM_ADDR}|${EXT_TO_ADDR}|${EXT_SUBJ}|${EXT_PRIORITY}|${EXT_REPLY_TO}|${EXT_PAYLOAD_HASH}"
     SIGNATURE=$(sign_message "$SIGN_DATA")
 

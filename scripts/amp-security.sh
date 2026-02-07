@@ -258,7 +258,7 @@ verify_message_signature() {
 
     # Verify signature using openssl
     local result=$(echo -n "$canonical" | \
-        openssl pkeyutl -verify -pubin -inkey "$public_key_file" \
+        ${OPENSSL_BIN:-openssl} pkeyutl -verify -pubin -inkey "$public_key_file" \
         -sigfile <(echo "$signature" | base64 -d) 2>/dev/null && echo "true" || echo "false")
 
     echo "$result"
