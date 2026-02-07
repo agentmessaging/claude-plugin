@@ -511,22 +511,33 @@ load_config() {
         return 1
     fi
 
-    # ── Name mismatch detection ──
-    # If the config name doesn't match the AMP_DIR directory name, the config
-    # was likely poisoned by a bad amp-init (e.g. git repo name fallback).
-    # Auto-fix: update the config to match the directory (the directory name
-    # comes from CLAUDE_AGENT_NAME or tmux, which are authoritative).
-    local _expected_name
+    # ── Name & address mismatch detection ──
+    # If the config name OR address doesn't match the AMP_DIR directory name,
+    # the config was likely poisoned by a bad amp-init (e.g. git repo name
+    # fallback). Auto-fix: update the config to match the directory (the
+    # directory name comes from CLAUDE_AGENT_NAME or tmux, which are
+    # authoritative).
+    local _expected_name _addr_local_part _needs_fix=false
     _expected_name=$(basename "$AMP_DIR")
-    if [ -n "$_expected_name" ] && [ "$AMP_AGENT_NAME" != "$_expected_name" ]; then
-        echo "  ⚠️  AMP name mismatch: config='${AMP_AGENT_NAME}' dir='${_expected_name}'" >&2
-        echo "  Auto-fixing config to match agent directory..." >&2
-        # Re-save config with the correct name
-        local _new_address
-        _new_address=$(save_config "$_expected_name" "$AMP_TENANT" "$AMP_FINGERPRINT")
-        AMP_AGENT_NAME="$_expected_name"
-        AMP_ADDRESS="$_new_address"
-        echo "  ✅ Fixed: name='${AMP_AGENT_NAME}' address='${AMP_ADDRESS}'" >&2
+    _addr_local_part="${AMP_ADDRESS%%@*}"
+
+    if [ -n "$_expected_name" ]; then
+        if [ "$AMP_AGENT_NAME" != "$_expected_name" ]; then
+            echo "  ⚠️  AMP name mismatch: config='${AMP_AGENT_NAME}' dir='${_expected_name}'" >&2
+            _needs_fix=true
+        elif [ "$_addr_local_part" != "$_expected_name" ]; then
+            echo "  ⚠️  AMP address mismatch: address='${AMP_ADDRESS}' expected='${_expected_name}@...'" >&2
+            _needs_fix=true
+        fi
+
+        if [ "$_needs_fix" = true ]; then
+            echo "  Auto-fixing config to match agent directory..." >&2
+            local _new_address
+            _new_address=$(save_config "$_expected_name" "$AMP_TENANT" "$AMP_FINGERPRINT")
+            AMP_AGENT_NAME="$_expected_name"
+            AMP_ADDRESS="$_new_address"
+            echo "  ✅ Fixed: name='${AMP_AGENT_NAME}' address='${AMP_ADDRESS}'" >&2
+        fi
     fi
 
     return 0
