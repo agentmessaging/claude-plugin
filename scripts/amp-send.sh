@@ -237,7 +237,7 @@ if [ "$ROUTE" = "local" ]; then
             DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "sent"')
             DELIVERY_METHOD=$(echo "$BODY" | jq -r '.method // "api"')
 
-            echo "✅ Message sent via AI Maestro"
+            echo "✅ Message sent via AMP routing"
             echo ""
             echo "  To:       ${FULL_RECIPIENT}"
             echo "  Subject:  ${SUBJECT}"
@@ -247,7 +247,7 @@ if [ "$ROUTE" = "local" ]; then
             echo "  Status:   ${DELIVERY_STATUS}"
             echo "  Method:   ${DELIVERY_METHOD}"
         else
-            echo "❌ Failed to send via AI Maestro (HTTP ${HTTP_CODE})"
+            echo "❌ Failed to send via AMP routing (HTTP ${HTTP_CODE})"
             ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
             if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
                 echo "   Error: ${ERROR_MSG}"
@@ -257,50 +257,197 @@ if [ "$ROUTE" = "local" ]; then
 
     else
         # ==========================================================================
-        # Filesystem Delivery (legacy, single-machine only)
+        # No AI Maestro registration found — attempt auto-registration
         # ==========================================================================
-        parse_address "$RECIPIENT"
-        FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
+        # Instead of silently falling back to filesystem (which only works on the
+        # same machine), try to register with AI Maestro first so cross-host
+        # delivery works automatically.
 
-        # Save to our sent folder
-        save_to_sent "$MESSAGE_JSON" >/dev/null
+        echo "  No AMP registration found. Auto-registering..."
 
-        MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
-
-        # For filesystem delivery, store in recipient's inbox
-        # With per-agent AMP_DIR, save_to_inbox writes to the SENDER's inbox (wrong).
-        # Instead, check if the recipient has a per-agent AMP directory and write there.
-        AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
-        RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
-
-        if [ -d "${RECIPIENT_AMP_DIR}" ]; then
-            # Recipient has per-agent AMP directory - write directly to their inbox
-            RECIPIENT_INBOX="${RECIPIENT_AMP_DIR}/messages/inbox"
-            FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
-            SENDER_DIR=$(sanitize_address_for_path "$FROM_ADDR")
-            mkdir -p "${RECIPIENT_INBOX}/${SENDER_DIR}"
-
-            # Add received_at metadata
-            DELIVERY_MSG=$(echo "$MESSAGE_JSON" | jq \
-                --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                '.local = (.local // {}) + {received_at: $received, status: "unread"}')
-
-            echo "$DELIVERY_MSG" > "${RECIPIENT_INBOX}/${SENDER_DIR}/${MSG_ID}.json"
-        else
-            # No per-agent dir for recipient, fall back to shared inbox (legacy)
-            save_to_inbox "$MESSAGE_JSON" >/dev/null
+        # Read agent's public key
+        AUTO_REG_PUBLIC_KEY=""
+        if [ -f "${AMP_KEYS_DIR}/public.pem" ]; then
+            AUTO_REG_PUBLIC_KEY=$(cat "${AMP_KEYS_DIR}/public.pem")
         fi
 
-        echo "✅ Message sent (filesystem delivery)"
-        echo ""
-        echo "  To:       ${FULL_RECIPIENT}"
-        echo "  Subject:  ${SUBJECT}"
-        echo "  Priority: ${PRIORITY}"
-        echo "  Type:     ${TYPE}"
-        echo "  ID:       ${MSG_ID}"
-        echo ""
-        echo "  Note: Using filesystem delivery. For mesh routing, register with AI Maestro:"
-        echo "        amp-register.sh --provider localhost:23000 --tenant ${AMP_TENANT}"
+        # Read agent name and tenant from config
+        AUTO_REG_NAME=$(jq -r '.name // empty' "$AMP_CONFIG" 2>/dev/null)
+        AUTO_REG_TENANT=$(jq -r '.tenant // "default"' "$AMP_CONFIG" 2>/dev/null)
+
+        AUTO_REG_SUCCESS=false
+
+        if [ -n "$AUTO_REG_PUBLIC_KEY" ] && [ -n "$AUTO_REG_NAME" ]; then
+            AUTO_REG_REQUEST=$(jq -n \
+                --arg name "$AUTO_REG_NAME" \
+                --arg tenant "$AUTO_REG_TENANT" \
+                --arg publicKey "$AUTO_REG_PUBLIC_KEY" \
+                '{
+                    name: $name,
+                    tenant: $tenant,
+                    public_key: $publicKey,
+                    key_algorithm: "Ed25519"
+                }')
+
+            AUTO_REG_RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 3 -X POST \
+                "${AMP_MAESTRO_URL}/api/v1/register" \
+                -H "Content-Type: application/json" \
+                -d "$AUTO_REG_REQUEST" 2>&1) || true
+
+            AUTO_REG_HTTP=$(echo "$AUTO_REG_RESPONSE" | tail -n1)
+            AUTO_REG_BODY=$(echo "$AUTO_REG_RESPONSE" | sed '$d')
+
+            if [ "$AUTO_REG_HTTP" = "200" ] || [ "$AUTO_REG_HTTP" = "201" ]; then
+                # Parse registration and save
+                AUTO_API_KEY=$(echo "$AUTO_REG_BODY" | jq -r '.api_key // empty')
+                AUTO_ADDRESS=$(echo "$AUTO_REG_BODY" | jq -r '.address // empty')
+                AUTO_AGENT_ID=$(echo "$AUTO_REG_BODY" | jq -r '.agent_id // empty')
+                AUTO_PROVIDER_NAME=$(echo "$AUTO_REG_BODY" | jq -r '.provider.name // "aimaestro.local"')
+                AUTO_PROVIDER_ENDPOINT=$(echo "$AUTO_REG_BODY" | jq -r '.provider.endpoint // empty')
+                AUTO_FINGERPRINT=$(jq -r '.fingerprint // empty' "$AMP_CONFIG" 2>/dev/null)
+
+                if [ -n "$AUTO_API_KEY" ]; then
+                    ensure_amp_dirs
+                    REG_FILE="${AMP_REGISTRATIONS_DIR}/${AUTO_PROVIDER_NAME}.json"
+
+                    jq -n \
+                        --arg provider "$AUTO_PROVIDER_NAME" \
+                        --arg apiUrl "${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}" \
+                        --arg agentName "$AUTO_REG_NAME" \
+                        --arg tenant "$AUTO_REG_TENANT" \
+                        --arg address "${AUTO_ADDRESS:-${AUTO_REG_NAME}@${AUTO_REG_TENANT}.${AMP_PROVIDER_DOMAIN}}" \
+                        --arg apiKey "$AUTO_API_KEY" \
+                        --arg providerAgentId "$AUTO_AGENT_ID" \
+                        --arg fingerprint "$AUTO_FINGERPRINT" \
+                        --arg registeredAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                        '{
+                            provider: $provider,
+                            apiUrl: $apiUrl,
+                            agentName: $agentName,
+                            tenant: $tenant,
+                            address: $address,
+                            apiKey: $apiKey,
+                            providerAgentId: $providerAgentId,
+                            fingerprint: $fingerprint,
+                            registeredAt: $registeredAt
+                        }' > "$REG_FILE"
+
+                    echo "  ✅ AMP identity registered"
+                    AUTO_REG_SUCCESS=true
+
+                    # Now send via AI Maestro API (same logic as the registered path)
+                    parse_address "$RECIPIENT"
+                    FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
+
+                    API_BODY=$(jq -n \
+                        --arg to "$FULL_RECIPIENT" \
+                        --arg subject "$SUBJECT" \
+                        --arg priority "$PRIORITY" \
+                        --arg type "$TYPE" \
+                        --arg message "$MESSAGE" \
+                        --arg in_reply_to "$REPLY_TO" \
+                        --argjson context "$CONTEXT" \
+                        --arg signature "$SIGNATURE" \
+                        '{
+                            to: $to,
+                            subject: $subject,
+                            priority: $priority,
+                            payload: {
+                                type: $type,
+                                message: $message,
+                                context: $context
+                            },
+                            in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
+                            signature: $signature
+                        }')
+
+                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${AUTO_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}/route" \
+                        -H "Content-Type: application/json" \
+                        -H "Authorization: Bearer ${AUTO_API_KEY}" \
+                        -d "$API_BODY" 2>&1)
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | sed '$d')
+
+                    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+                        save_to_sent "$MESSAGE_JSON" >/dev/null
+
+                        MSG_ID=$(echo "$BODY" | jq -r '.id // empty')
+                        [ -z "$MSG_ID" ] && MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+                        DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "sent"')
+                        DELIVERY_METHOD=$(echo "$BODY" | jq -r '.method // "api"')
+
+                        echo "✅ Message sent via AMP routing (auto-registered)"
+                        echo ""
+                        echo "  To:       ${FULL_RECIPIENT}"
+                        echo "  Subject:  ${SUBJECT}"
+                        echo "  Priority: ${PRIORITY}"
+                        echo "  Type:     ${TYPE}"
+                        echo "  ID:       ${MSG_ID}"
+                        echo "  Status:   ${DELIVERY_STATUS}"
+                        echo "  Method:   ${DELIVERY_METHOD}"
+                    else
+                        echo "❌ Failed to send via AMP after auto-registration (HTTP ${HTTP_CODE})"
+                        ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
+                        if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
+                            echo "   Error: ${ERROR_MSG}"
+                        fi
+                        exit 1
+                    fi
+                fi
+            elif [ "$AUTO_REG_HTTP" = "409" ]; then
+                echo "  ⚠️  AMP identity already registered but local config is missing."
+                echo "     Re-run: amp-init.sh --force --auto"
+            fi
+        fi
+
+        # If auto-registration failed, check if recipient is truly local
+        if [ "$AUTO_REG_SUCCESS" = false ]; then
+            parse_address "$RECIPIENT"
+            FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
+
+            AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
+            RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
+
+            if [ -d "${RECIPIENT_AMP_DIR}" ]; then
+                # Recipient IS on this machine - filesystem delivery is valid
+                save_to_sent "$MESSAGE_JSON" >/dev/null
+                MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+                RECIPIENT_INBOX="${RECIPIENT_AMP_DIR}/messages/inbox"
+                FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
+                SENDER_DIR=$(sanitize_address_for_path "$FROM_ADDR")
+                mkdir -p "${RECIPIENT_INBOX}/${SENDER_DIR}"
+
+                DELIVERY_MSG=$(echo "$MESSAGE_JSON" | jq \
+                    --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    '.local = (.local // {}) + {received_at: $received, status: "unread"}')
+
+                echo "$DELIVERY_MSG" > "${RECIPIENT_INBOX}/${SENDER_DIR}/${MSG_ID}.json"
+
+                echo "✅ Message sent (local filesystem delivery)"
+                echo ""
+                echo "  To:       ${FULL_RECIPIENT}"
+                echo "  Subject:  ${SUBJECT}"
+                echo "  Priority: ${PRIORITY}"
+                echo "  Type:     ${TYPE}"
+                echo "  ID:       ${MSG_ID}"
+            else
+                # Recipient NOT on this machine AND no AMP registration
+                # FAIL instead of silently losing the message
+                echo "❌ Cannot deliver message to '${FULL_RECIPIENT}'"
+                echo ""
+                echo "  The recipient '${ADDR_NAME}' was not found on this machine,"
+                echo "  and this agent has no AMP identity for cross-host routing."
+                echo ""
+                echo "  To fix this, run:"
+                echo "    amp-init.sh --force --auto"
+                echo ""
+                echo "  This will create an AMP identity and enable cross-host messaging."
+                exit 1
+            fi
+        fi
     fi
 
 else

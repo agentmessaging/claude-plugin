@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --name, -n NAME      Agent name (e.g., backend-api)"
-            echo "  --tenant, -t TENANT  Organization/tenant (auto-fetched from AI Maestro)"
+            echo "  --tenant, -t TENANT  Organization/tenant (auto-detected)"
             echo "  --auto, -a           Auto-detect name from environment"
             echo "  --force, -f          Overwrite existing configuration"
             echo "  --help, -h           Show this help"
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
             echo "Examples:"
             echo "  amp-init --auto                    # Auto-detect from tmux/git"
             echo "  amp-init --name backend-api       # Set specific name"
-            echo "  amp-init -n myagent               # Tenant auto-fetched from AI Maestro"
+            echo "  amp-init -n myagent               # Tenant auto-detected"
             exit 0
             ;;
         *)
@@ -69,9 +69,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Get organization from AI Maestro if not explicitly provided
+# Get organization if not explicitly provided
 if [ -z "$TENANT" ]; then
-    echo "Fetching organization from AI Maestro..."
+    echo "Detecting organization..."
     ORG=$(get_organization 2>/dev/null) || true
 
     if [ -n "$ORG" ] && [ "$ORG" != "default" ]; then
@@ -82,13 +82,13 @@ if [ -z "$TENANT" ]; then
         # This allows offline initialization and legacy setups
         TENANT="default"
         echo ""
-        echo "⚠️  Note: Organization not configured in AI Maestro."
+        echo "⚠️  Note: Organization not configured."
         echo "   Using 'default' tenant for backward compatibility."
         echo ""
         echo "   For full mesh networking, configure your organization:"
-        echo "   1. Open AI Maestro at ${AMP_MAESTRO_URL:-http://localhost:23000}"
+        echo "   1. Open the dashboard at ${AMP_MAESTRO_URL:-http://localhost:23000}"
         echo "   2. Complete the organization setup"
-        echo "   3. Run 'amp-init --force' to reinitialize with organization"
+        echo "   3. Run 'amp-init --force' to reinitialize"
         echo ""
     fi
 fi
@@ -156,9 +156,9 @@ echo "  Creating identity file..."
 IDENTITY_FILE=$(create_identity_file "$NAME" "$TENANT" "$ADDRESS" "$FINGERPRINT")
 
 # =============================================================================
-# Auto-register with local AI Maestro for mesh routing
+# Auto-register AMP identity for cross-host routing
 # =============================================================================
-echo "  Registering with AI Maestro for mesh routing..."
+echo "  Registering AMP identity..."
 
 # Get the PEM-encoded public key
 PUBLIC_KEY_PEM=$(cat "${AMP_KEYS_DIR}/public.pem")
@@ -223,14 +223,14 @@ if [ "$REG_HTTP_CODE" = "200" ] || [ "$REG_HTTP_CODE" = "201" ]; then
 
         chmod 600 "$REG_FILE"
         REGISTRATION_OK=true
-        echo "  ✅ Registered with AI Maestro (mesh routing enabled)"
+        echo "  ✅ AMP identity registered (cross-host routing enabled)"
     else
-        echo "  ⚠️  AI Maestro registration succeeded but no API key returned"
+        echo "  ⚠️  AMP registration succeeded but no API key returned"
     fi
 
 elif [ "$REG_HTTP_CODE" = "409" ]; then
     # Agent name already registered - this is fine (re-init scenario)
-    echo "  ℹ️  Already registered with AI Maestro"
+    echo "  ℹ️  AMP identity already registered"
     # Check if we already have a registration file
     for reg_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
         [ -f "$reg_file" ] || continue
@@ -242,14 +242,14 @@ elif [ "$REG_HTTP_CODE" = "409" ]; then
     done
 
 elif [ "$REG_HTTP_CODE" = "000" ] || [ -z "$REG_HTTP_CODE" ]; then
-    echo "  ⚠️  AI Maestro not reachable at ${AMP_MAESTRO_URL}"
-    echo "     Mesh routing will not work until you register."
-    echo "     Start AI Maestro and run: amp-init --force"
+    echo "  ⚠️  AMP provider not reachable at ${AMP_MAESTRO_URL}"
+    echo "     Cross-host routing will not work until connected."
+    echo "     Start the server and run: amp-init --force"
 
 else
     REG_ERROR=$(echo "$REG_BODY" | jq -r '.message // .error // "Unknown error"' 2>/dev/null)
-    echo "  ⚠️  AI Maestro registration failed (HTTP ${REG_HTTP_CODE}): ${REG_ERROR}"
-    echo "     Local messaging works, but mesh routing requires registration."
+    echo "  ⚠️  AMP registration failed (HTTP ${REG_HTTP_CODE}): ${REG_ERROR}"
+    echo "     Local messaging works, but cross-host routing requires registration."
 fi
 
 # Update identity file with registration info
@@ -265,7 +265,7 @@ echo "  Tenant:      ${TENANT}"
 echo "  Address:     ${ADDRESS}"
 echo "  Fingerprint: ${FINGERPRINT}"
 if [ "$REGISTRATION_OK" = true ]; then
-    echo "  Mesh:        ✅ Enabled (registered with AI Maestro)"
+    echo "  Mesh:        ✅ Enabled (AMP identity registered)"
 else
     echo "  Mesh:        ❌ Not registered (filesystem delivery only)"
 fi
