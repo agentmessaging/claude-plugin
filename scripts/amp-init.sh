@@ -155,6 +155,108 @@ ADDRESS=$(save_config "$NAME" "$TENANT" "$FINGERPRINT")
 echo "  Creating identity file..."
 IDENTITY_FILE=$(create_identity_file "$NAME" "$TENANT" "$ADDRESS" "$FINGERPRINT")
 
+# =============================================================================
+# Auto-register with local AI Maestro for mesh routing
+# =============================================================================
+echo "  Registering with AI Maestro for mesh routing..."
+
+# Get the PEM-encoded public key
+PUBLIC_KEY_PEM=$(cat "${AMP_KEYS_DIR}/public.pem")
+
+# Build registration request
+REG_REQUEST=$(jq -n \
+    --arg name "$NAME" \
+    --arg tenant "$TENANT" \
+    --arg publicKey "$PUBLIC_KEY_PEM" \
+    '{
+        name: $name,
+        tenant: $tenant,
+        public_key: $publicKey,
+        key_algorithm: "Ed25519"
+    }')
+
+# Try to register with local AI Maestro
+REG_RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 3 -X POST \
+    "${AMP_MAESTRO_URL}/api/v1/register" \
+    -H "Content-Type: application/json" \
+    -d "$REG_REQUEST" 2>&1) || true
+
+REG_HTTP_CODE=$(echo "$REG_RESPONSE" | tail -n1)
+REG_BODY=$(echo "$REG_RESPONSE" | sed '$d')
+
+REGISTRATION_OK=false
+
+if [ "$REG_HTTP_CODE" = "200" ] || [ "$REG_HTTP_CODE" = "201" ]; then
+    # Parse registration response
+    REG_API_KEY=$(echo "$REG_BODY" | jq -r '.api_key // empty')
+    REG_ADDRESS=$(echo "$REG_BODY" | jq -r '.address // empty')
+    REG_AGENT_ID=$(echo "$REG_BODY" | jq -r '.agent_id // empty')
+    REG_PROVIDER_NAME=$(echo "$REG_BODY" | jq -r '.provider.name // "aimaestro.local"')
+    REG_PROVIDER_ENDPOINT=$(echo "$REG_BODY" | jq -r '.provider.endpoint // empty')
+
+    if [ -n "$REG_API_KEY" ]; then
+        # Save registration file
+        ensure_amp_dirs
+        REG_FILE="${AMP_REGISTRATIONS_DIR}/${REG_PROVIDER_NAME}.json"
+
+        jq -n \
+            --arg provider "$REG_PROVIDER_NAME" \
+            --arg apiUrl "${REG_PROVIDER_ENDPOINT:-${AMP_MAESTRO_URL}/api/v1}" \
+            --arg agentName "$NAME" \
+            --arg tenant "$TENANT" \
+            --arg address "${REG_ADDRESS:-$ADDRESS}" \
+            --arg apiKey "$REG_API_KEY" \
+            --arg providerAgentId "$REG_AGENT_ID" \
+            --arg fingerprint "$FINGERPRINT" \
+            --arg registeredAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+                provider: $provider,
+                apiUrl: $apiUrl,
+                agentName: $agentName,
+                tenant: $tenant,
+                address: $address,
+                apiKey: $apiKey,
+                providerAgentId: $providerAgentId,
+                fingerprint: $fingerprint,
+                registeredAt: $registeredAt
+            }' > "$REG_FILE"
+
+        chmod 600 "$REG_FILE"
+        REGISTRATION_OK=true
+        echo "  ✅ Registered with AI Maestro (mesh routing enabled)"
+    else
+        echo "  ⚠️  AI Maestro registration succeeded but no API key returned"
+    fi
+
+elif [ "$REG_HTTP_CODE" = "409" ]; then
+    # Agent name already registered - this is fine (re-init scenario)
+    echo "  ℹ️  Already registered with AI Maestro"
+    # Check if we already have a registration file
+    for reg_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
+        [ -f "$reg_file" ] || continue
+        provider=$(jq -r '.provider // empty' "$reg_file" 2>/dev/null)
+        if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+            REGISTRATION_OK=true
+            break
+        fi
+    done
+
+elif [ "$REG_HTTP_CODE" = "000" ] || [ -z "$REG_HTTP_CODE" ]; then
+    echo "  ⚠️  AI Maestro not reachable at ${AMP_MAESTRO_URL}"
+    echo "     Mesh routing will not work until you register."
+    echo "     Start AI Maestro and run: amp-init --force"
+
+else
+    REG_ERROR=$(echo "$REG_BODY" | jq -r '.message // .error // "Unknown error"' 2>/dev/null)
+    echo "  ⚠️  AI Maestro registration failed (HTTP ${REG_HTTP_CODE}): ${REG_ERROR}"
+    echo "     Local messaging works, but mesh routing requires registration."
+fi
+
+# Update identity file with registration info
+if [ "$REGISTRATION_OK" = true ]; then
+    IDENTITY_FILE=$(create_identity_file "$NAME" "$TENANT" "$ADDRESS" "$FINGERPRINT")
+fi
+
 echo ""
 echo "✅ AMP initialized successfully!"
 echo ""
@@ -162,6 +264,11 @@ echo "  Agent Name:  ${NAME}"
 echo "  Tenant:      ${TENANT}"
 echo "  Address:     ${ADDRESS}"
 echo "  Fingerprint: ${FINGERPRINT}"
+if [ "$REGISTRATION_OK" = true ]; then
+    echo "  Mesh:        ✅ Enabled (registered with AI Maestro)"
+else
+    echo "  Mesh:        ❌ Not registered (filesystem delivery only)"
+fi
 echo ""
 echo "Files created:"
 echo "  Keys:     ${AMP_KEYS_DIR}/"
