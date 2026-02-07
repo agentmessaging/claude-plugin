@@ -22,7 +22,43 @@ if [ -f "${SCRIPT_DIR_HELPER}/amp-security.sh" ]; then
 fi
 
 # Configuration
-AMP_DIR="${AMP_DIR:-${HOME}/.agent-messaging}"
+#
+# Per-Agent Isolation:
+#   Each agent gets its own AMP directory at ~/.agent-messaging/agents/<name>/
+#   This ensures inboxes, sent folders, keys, and config are completely isolated.
+#   The shared ~/.agent-messaging/ is only used as a legacy fallback.
+#
+# Resolution order for AMP_DIR:
+#   1. Explicit AMP_DIR env var (set by AI Maestro wake/create routes)
+#   2. Auto-detect from agent name → ~/.agent-messaging/agents/<name>/
+#   3. Fallback to shared ~/.agent-messaging/ (legacy, not recommended)
+#
+AMP_AGENTS_BASE="${HOME}/.agent-messaging/agents"
+
+if [ -z "${AMP_DIR:-}" ]; then
+    # AMP_DIR not explicitly set - try to auto-resolve per-agent directory
+    _amp_agent_name=""
+
+    # Try CLAUDE_AGENT_NAME env var first (fastest)
+    if [ -n "${CLAUDE_AGENT_NAME:-}" ]; then
+        _amp_agent_name="${CLAUDE_AGENT_NAME}"
+    # Try tmux session name
+    elif [ -n "${TMUX:-}" ]; then
+        _amp_agent_name=$(tmux display-message -p '#S' 2>/dev/null || true)
+        # Remove any _N suffix (multi-session pattern)
+        _amp_agent_name="${_amp_agent_name%_[0-9]*}"
+    fi
+
+    # If we have an agent name and its per-agent dir exists, use it
+    if [ -n "$_amp_agent_name" ] && [ -d "${AMP_AGENTS_BASE}/${_amp_agent_name}" ]; then
+        AMP_DIR="${AMP_AGENTS_BASE}/${_amp_agent_name}"
+    else
+        # Legacy fallback to shared directory
+        AMP_DIR="${HOME}/.agent-messaging"
+    fi
+    unset _amp_agent_name
+fi
+
 AMP_CONFIG="${AMP_DIR}/config.json"
 AMP_KEYS_DIR="${AMP_DIR}/keys"
 AMP_MESSAGES_DIR="${AMP_DIR}/messages"

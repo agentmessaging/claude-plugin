@@ -117,8 +117,16 @@ for provider in "${PROVIDERS[@]}"; do
         echo "  Address: ${EXTERNAL_ADDRESS}"
     fi
 
+    # Determine fetch endpoint based on provider type
+    # AI Maestro local providers use /messages/pending (API_URL already includes /api/v1)
+    # External providers (e.g., Crabmail) use /v1/inbox
+    FETCH_ENDPOINT="${API_URL}/v1/inbox"
+    if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+        FETCH_ENDPOINT="${API_URL}/messages/pending"
+    fi
+
     # Fetch messages from provider
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${API_URL}/v1/inbox" \
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${FETCH_ENDPOINT}" \
         -H "Authorization: Bearer ${API_KEY}" \
         -H "Accept: application/json" 2>&1)
 
@@ -153,8 +161,8 @@ for provider in "${PROVIDERS[@]}"; do
                 continue
             fi
 
-            # Check if already exists locally
-            if [ -f "${AMP_INBOX_DIR}/${msg_id}.json" ]; then
+            # Check if already exists locally (search flat and sender subdirectories)
+            if find_message_file "${msg_id}" "${AMP_INBOX_DIR}" >/dev/null 2>&1; then
                 if [ "$VERBOSE" = true ]; then
                     echo "    Skipping ${msg_id} (already exists)"
                 fi
@@ -163,8 +171,8 @@ for provider in "${PROVIDERS[@]}"; do
 
             # Apply content security (external messages are always "external" trust level)
             # Check if signature is present
-            local signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
-            local sig_valid="false"
+            signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
+            sig_valid="false"
             if [ -n "$signature" ]; then
                 # TODO: Verify signature against sender's public key
                 sig_valid="true"
@@ -189,8 +197,8 @@ for provider in "${PROVIDERS[@]}"; do
                 }')
 
             # Save to inbox (use sender subdirectory)
-            local from_addr=$(echo "$msg" | jq -r '.envelope.from')
-            local sender_dir=$(sanitize_address_for_path "$from_addr")
+            from_addr=$(echo "$msg" | jq -r '.envelope.from')
+            sender_dir=$(sanitize_address_for_path "$from_addr")
             mkdir -p "${AMP_INBOX_DIR}/${sender_dir}"
             echo "$msg" > "${AMP_INBOX_DIR}/${sender_dir}/${msg_id}.json"
 
@@ -206,9 +214,17 @@ for provider in "${PROVIDERS[@]}"; do
 
             # Mark as fetched on provider (if enabled)
             if [ "$MARK_AS_FETCHED" = true ]; then
-                curl -s -X POST "${API_URL}/v1/inbox/${msg_id}/ack" \
-                    -H "Authorization: Bearer ${API_KEY}" \
-                    >/dev/null 2>&1 || true
+                # AI Maestro uses DELETE /messages/pending?id=X
+                # External providers use POST /v1/inbox/<id>/ack
+                if [[ "$provider" == *"aimaestro"* ]] || [[ "$provider" == *".local"* ]]; then
+                    curl -s -X DELETE "${API_URL}/messages/pending?id=${msg_id}" \
+                        -H "Authorization: Bearer ${API_KEY}" \
+                        >/dev/null 2>&1 || true
+                else
+                    curl -s -X POST "${API_URL}/v1/inbox/${msg_id}/ack" \
+                        -H "Authorization: Bearer ${API_KEY}" \
+                        >/dev/null 2>&1 || true
+                fi
             fi
         done < <(echo "$BODY" | jq -c '.messages[]' 2>/dev/null)
 

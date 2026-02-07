@@ -134,7 +134,7 @@ echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
     subject=$(echo "$msg" | jq -r '.envelope.subject')
     priority=$(echo "$msg" | jq -r '.envelope.priority')
     timestamp=$(echo "$msg" | jq -r '.envelope.timestamp')
-    status=$(echo "$msg" | jq -r '.metadata.status // "unread"')
+    status=$(echo "$msg" | jq -r '.local.status // .metadata.status // "unread"')
     msg_type=$(echo "$msg" | jq -r '.payload.type // "notification"')
 
     # Format timestamp

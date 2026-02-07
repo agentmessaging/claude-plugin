@@ -265,11 +265,31 @@ if [ "$ROUTE" = "local" ]; then
         # Save to our sent folder
         save_to_sent "$MESSAGE_JSON" >/dev/null
 
-        # For filesystem delivery, store in local inbox
-        # This only works when sender and recipient share the same machine
-        INBOX_FILE=$(save_to_inbox "$MESSAGE_JSON")
-
         MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+        # For filesystem delivery, store in recipient's inbox
+        # With per-agent AMP_DIR, save_to_inbox writes to the SENDER's inbox (wrong).
+        # Instead, check if the recipient has a per-agent AMP directory and write there.
+        AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
+        RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
+
+        if [ -d "${RECIPIENT_AMP_DIR}" ]; then
+            # Recipient has per-agent AMP directory - write directly to their inbox
+            RECIPIENT_INBOX="${RECIPIENT_AMP_DIR}/messages/inbox"
+            FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
+            SENDER_DIR=$(sanitize_address_for_path "$FROM_ADDR")
+            mkdir -p "${RECIPIENT_INBOX}/${SENDER_DIR}"
+
+            # Add received_at metadata
+            DELIVERY_MSG=$(echo "$MESSAGE_JSON" | jq \
+                --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '.local = (.local // {}) + {received_at: $received, status: "unread"}')
+
+            echo "$DELIVERY_MSG" > "${RECIPIENT_INBOX}/${SENDER_DIR}/${MSG_ID}.json"
+        else
+            # No per-agent dir for recipient, fall back to shared inbox (legacy)
+            save_to_inbox "$MESSAGE_JSON" >/dev/null
+        fi
 
         echo "✅ Message sent (filesystem delivery)"
         echo ""
