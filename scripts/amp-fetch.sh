@@ -260,6 +260,8 @@ for provider in "${PROVIDERS[@]}"; do
                     fetch_att_name=$(echo "$fetch_att" | jq -r '.filename // "unknown"')
                     if [ "$fetch_scan" = "rejected" ]; then
                         echo "    ⚠️  WARNING: Attachment '${fetch_att_name}' rejected by security scan!"
+                    elif [ "$fetch_scan" = "suspicious" ]; then
+                        echo "    ⚠️  WARNING: Attachment '${fetch_att_name}' flagged as suspicious — requires human approval!"
                     elif [ "$fetch_scan" = "pending" ] || [ "$fetch_scan" = "unknown" ]; then
                         echo "    ⚠️  Attachment '${fetch_att_name}' scan status: ${fetch_scan}"
                     fi

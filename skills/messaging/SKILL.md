@@ -286,6 +286,8 @@ You can interact using natural language:
 - "Download the attachments from that message"
 - "Save the files from the last message"
 
+**Important:** Attachments with `scan_status: "suspicious"` require human approval before downloading or processing. Always warn the user and wait for explicit confirmation before proceeding with suspicious files. Attachments with `scan_status: "rejected"` must never be downloaded.
+
 ### External Provider Registration
 
 When a user asks to register with an external provider, **always ask for authorization first**:

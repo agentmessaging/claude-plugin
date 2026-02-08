@@ -206,8 +206,8 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
         [ -f "$provider_file" ] || continue
         prov=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
         if [ "$prov" = "aimaestro.local" ] || [ "$prov" = "${AMP_PROVIDER_DOMAIN}" ]; then
-            UPLOAD_API_URL=$(jq -r '.apiUrl' "$provider_file" 2>/dev/null)
-            UPLOAD_API_KEY=$(jq -r '.apiKey' "$provider_file" 2>/dev/null)
+            UPLOAD_API_URL=$(jq -r '.apiUrl // empty' "$provider_file" 2>/dev/null)
+            UPLOAD_API_KEY=$(jq -r '.apiKey // empty' "$provider_file" 2>/dev/null)
             break
         fi
     done
@@ -216,8 +216,8 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
     if [ -z "$UPLOAD_API_URL" ] && [ "$ROUTE" != "local" ]; then
         REG_FILE="${AMP_REGISTRATIONS_DIR}/${ROUTE}.json"
         if [ -f "$REG_FILE" ]; then
-            UPLOAD_API_URL=$(jq -r '.apiUrl' "$REG_FILE" 2>/dev/null)
-            UPLOAD_API_KEY=$(jq -r '.apiKey' "$REG_FILE" 2>/dev/null)
+            UPLOAD_API_URL=$(jq -r '.apiUrl // empty' "$REG_FILE" 2>/dev/null)
+            UPLOAD_API_KEY=$(jq -r '.apiKey // empty' "$REG_FILE" 2>/dev/null)
         fi
     fi
 
@@ -264,8 +264,7 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
                 --arg digest "$local_digest" \
                 --arg scan_status "clean" \
                 --arg uploaded_at "$local_uploaded_at" \
-                --arg local_path "${local_att_dir}/${local_filename}" \
-                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, url: null, scan_status: $scan_status, uploaded_at: $uploaded_at, local_path: $local_path}')
+                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, url: null, scan_status: $scan_status, uploaded_at: $uploaded_at}')
             ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
         done
     fi
@@ -554,7 +553,8 @@ if [ "$ROUTE" = "local" ]; then
 
                 DELIVERY_MSG=$(echo "$MESSAGE_JSON" | jq \
                     --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                    '.local = (.local // {}) + {received_at: $received, status: "unread"}')
+                    '.local = (.local // {}) + {received_at: $received, status: "unread"} |
+                     .payload.attachments = [(.payload.attachments // [])[] | del(.local_path)]')
 
                 echo "$DELIVERY_MSG" > "${RECIPIENT_INBOX}/${SENDER_DIR}/${MSG_ID}.json"
 

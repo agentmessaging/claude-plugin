@@ -135,8 +135,8 @@ for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
     [ -f "$provider_file" ] || continue
     prov=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
     if [ "$prov" = "aimaestro.local" ] || [ "$prov" = "${AMP_PROVIDER_DOMAIN}" ]; then
-        DL_API_URL=$(jq -r '.apiUrl' "$provider_file" 2>/dev/null)
-        DL_API_KEY=$(jq -r '.apiKey' "$provider_file" 2>/dev/null)
+        DL_API_URL=$(jq -r '.apiUrl // empty' "$provider_file" 2>/dev/null)
+        DL_API_KEY=$(jq -r '.apiKey // empty' "$provider_file" 2>/dev/null)
         break
     fi
 done
@@ -157,9 +157,16 @@ download_single_attachment() {
     local att_scan
     att_scan=$(echo "$att_json" | jq -r '.scan_status // "unknown"')
 
-    # Warn about suspicious files
+    # Warn about suspicious/rejected files
     if [ "$att_scan" = "rejected" ]; then
         echo "  ⚠️  SKIPPING ${att_filename}: rejected by security scan!"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+
+    if [ "$att_scan" = "suspicious" ]; then
+        echo "  ⚠️  WARNING: ${att_filename} flagged as suspicious by security scan!"
+        echo "      Skipping — requires human approval before download."
         FAILED=$((FAILED + 1))
         return 1
     fi
@@ -206,4 +213,7 @@ else
 fi
 
 echo ""
+if [ "$DOWNLOAD_ALL" = true ]; then
+    echo "Results: ${DOWNLOADED} downloaded, ${FAILED} failed"
+fi
 echo "Download directory: ${DEST_DIR}"

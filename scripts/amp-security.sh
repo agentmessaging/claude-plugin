@@ -181,8 +181,22 @@ apply_content_security() {
     # Determine trust level
     local trust=$(determine_trust_level "$from_address" "$signature_valid" "$local_tenant")
 
-    # Detect injection patterns
+    # Detect injection patterns in message body
     local injection_flags=$(detect_injection_patterns "$content")
+
+    # Also scan attachment filenames for injection patterns (S-NEW-1)
+    local att_fn_list
+    att_fn_list=$(echo "$message_json" | jq -r '.payload.attachments[]?.filename // empty' 2>/dev/null || echo "")
+    if [ -n "$att_fn_list" ]; then
+        local att_injection_flags
+        att_injection_flags=$(detect_injection_patterns "$att_fn_list")
+        local att_fl_count
+        att_fl_count=$(echo "$att_injection_flags" | jq 'length' 2>/dev/null || echo "0")
+        if [ "$att_fl_count" -gt 0 ]; then
+            injection_flags=$(echo "$injection_flags" | jq --argjson att_flags "$att_injection_flags" '. + $att_flags')
+        fi
+    fi
+
     local flags_count=$(echo "$injection_flags" | jq 'length')
 
     # Determine if wrapping is needed

@@ -1393,8 +1393,13 @@ format_file_size() {
 }
 
 # Check if MIME type is blocked
+# Handles MIME parameters (e.g., "type; charset=utf-8") and case-insensitive matching
 is_mime_blocked() {
     local mime="$1"
+    # Strip MIME parameters (everything after first semicolon)
+    mime="${mime%%;*}"
+    # Trim whitespace and convert to lowercase for case-insensitive comparison
+    mime=$(echo "$mime" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
     for blocked in "${AMP_BLOCKED_MIME_TYPES[@]}"; do
         if [ "$mime" = "$blocked" ]; then
             return 0
@@ -1516,7 +1521,12 @@ upload_attachment() {
     local uploaded_at
     uploaded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local expires_at
-    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+    # macOS uses -v+7d, GNU date uses -d "+7 days", gdate is GNU date on some systems
+    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || gdate -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || python3 -c "from datetime import datetime,timedelta;print((datetime.utcnow()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null \
+        || echo "")
 
     jq -n \
         --arg id "$att_id" \
@@ -1556,8 +1566,19 @@ download_attachment() {
     filename=$(echo "$attachment_json" | jq -r '.filename')
     local expected_digest
     expected_digest=$(echo "$attachment_json" | jq -r '.digest // empty')
+    local expected_size
+    expected_size=$(echo "$attachment_json" | jq -r '.size // empty')
     local download_url
     download_url=$(echo "$attachment_json" | jq -r '.url // .download_url // empty')
+
+    # Validate attachment ID before using in any path (spec requirement: prevent path traversal)
+    validate_attachment_id "$att_id" || return 1
+
+    # Require digest for integrity verification (spec: digest is a required field)
+    if [ -z "$expected_digest" ]; then
+        echo "Error: Missing required digest field for attachment ${att_id}" >&2
+        return 1
+    fi
 
     filename=$(sanitize_filename "$filename")
     mkdir -p "$dest_dir"
@@ -1579,12 +1600,16 @@ download_attachment() {
     done
 
     # Try local file path first (for filesystem-delivered attachments)
-    local local_path
-    local_path=$(echo "$attachment_json" | jq -r '.local_path // empty')
-    if [ -z "$local_path" ]; then
-        # Check standard local attachment directory
-        local local_candidate="${AMP_ATTACHMENTS_DIR}/${att_id}/${filename}"
-        if [ -f "$local_candidate" ]; then
+    # Security: only allow paths within AMP_ATTACHMENTS_DIR to prevent path traversal
+    local local_path=""
+    local local_candidate="${AMP_ATTACHMENTS_DIR}/${att_id}/${filename}"
+    if [ -f "$local_candidate" ]; then
+        # Resolve symlinks and verify path is within expected directory
+        local resolved_path
+        resolved_path=$(cd "$(dirname "$local_candidate")" 2>/dev/null && pwd -P)/$(basename "$local_candidate") 2>/dev/null || true
+        local resolved_base
+        resolved_base=$(cd "$AMP_ATTACHMENTS_DIR" 2>/dev/null && pwd -P) 2>/dev/null || true
+        if [ -n "$resolved_path" ] && [ -n "$resolved_base" ] && [[ "$resolved_path" == "${resolved_base}/"* ]]; then
             local_path="$local_candidate"
         fi
     fi
@@ -1592,13 +1617,21 @@ download_attachment() {
     if [ -n "$local_path" ] && [ -f "$local_path" ]; then
         cp "$local_path" "$dest_path"
         # Verify digest
-        if [ -n "$expected_digest" ]; then
-            local actual_digest
-            actual_digest=$(compute_file_digest "$dest_path")
-            if [ "$actual_digest" != "$expected_digest" ]; then
+        local actual_digest
+        actual_digest=$(compute_file_digest "$dest_path")
+        if [ "$actual_digest" != "$expected_digest" ]; then
+            rm -f "$dest_path"
+            echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
+            echo "  The file may have been tampered with." >&2
+            return 1
+        fi
+        # Verify size if provided
+        if [ -n "$expected_size" ] && [ "$expected_size" != "null" ]; then
+            local actual_size
+            actual_size=$(wc -c < "$dest_path" | tr -d ' ')
+            if [ "$actual_size" != "$expected_size" ]; then
                 rm -f "$dest_path"
-                echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
-                echo "  The file may have been tampered with." >&2
+                echo "Error: Size mismatch! Expected ${expected_size} bytes, got ${actual_size}" >&2
                 return 1
             fi
         fi
@@ -1611,11 +1644,13 @@ download_attachment() {
     if [ -n "$download_url" ]; then
         local dl_response
         dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
+            --max-filesize "$AMP_MAX_ATTACHMENT_SIZE" \
             -o "$dest_path" "$download_url" 2>&1)
         dl_http=$(echo "$dl_response" | tail -n1)
-    elif [ -n "$api_url" ] && [ -n "$api_key" ]; then
+    elif [ -n "$api_url" ] && [ "$api_url" != "null" ] && [ -n "$api_key" ] && [ "$api_key" != "null" ]; then
         local dl_response
         dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
+            --max-filesize "$AMP_MAX_ATTACHMENT_SIZE" \
             -o "$dest_path" \
             -H "Authorization: Bearer ${api_key}" \
             "${api_url}/attachments/${att_id}/download" 2>&1)
@@ -1631,14 +1666,23 @@ download_attachment() {
         return 1
     fi
 
-    # Verify digest
-    if [ -n "$expected_digest" ]; then
-        local actual_digest
-        actual_digest=$(compute_file_digest "$dest_path")
-        if [ "$actual_digest" != "$expected_digest" ]; then
+    # Verify digest (mandatory)
+    local actual_digest
+    actual_digest=$(compute_file_digest "$dest_path")
+    if [ "$actual_digest" != "$expected_digest" ]; then
+        rm -f "$dest_path"
+        echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
+        echo "  The file may have been tampered with." >&2
+        return 1
+    fi
+
+    # Verify size if provided
+    if [ -n "$expected_size" ] && [ "$expected_size" != "null" ]; then
+        local actual_size
+        actual_size=$(wc -c < "$dest_path" | tr -d ' ')
+        if [ "$actual_size" != "$expected_size" ]; then
             rm -f "$dest_path"
-            echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
-            echo "  The file may have been tampered with." >&2
+            echo "Error: Size mismatch! Expected ${expected_size} bytes, got ${actual_size}" >&2
             return 1
         fi
     fi

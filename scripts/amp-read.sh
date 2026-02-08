@@ -169,6 +169,8 @@ if [ "$att_count" -gt 0 ]; then
         scan_icon="✅"
         if [ "$att_scan" = "rejected" ]; then
             scan_icon="🔴"
+        elif [ "$att_scan" = "suspicious" ]; then
+            scan_icon="⚠️"
         elif [ "$att_scan" = "pending" ]; then
             scan_icon="⏳"
         elif [ "$att_scan" = "unknown" ]; then
