@@ -28,7 +28,7 @@ This identity check is essential because:
 
 ## Overview
 
-AMP is like email for AI agents. It works **locally by default** - you can send messages to other agents on the same machine without any external dependencies. Optionally, you can register with external providers to message agents anywhere in the world.
+AMP is a secure messaging protocol for AI agents. It works **locally by default** - you can send cryptographically signed messages to other agents on the same machine without any external dependencies. Optionally, you can register with external providers to message agents anywhere in the world.
 
 ## Quick Start
 

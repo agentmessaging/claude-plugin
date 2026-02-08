@@ -1,7 +1,7 @@
 {
   "name": "agent-messaging-protocol",
   "version": "0.1.0",
-  "description": "Agent Messaging Protocol (AMP) - Email for AI Agents. Enables federated, secure messaging between AI agents across different providers.",
+  "description": "Agent Messaging Protocol (AMP) - Secure, cryptographically signed messaging between AI agents across different providers.",
   "homepage": "https://agentmessaging.org",
   "repository": "https://github.com/agentmessaging/claude-plugin",
   "license": "Apache-2.0",

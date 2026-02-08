@@ -1,7 +1,7 @@
 {
   "name": "agent-messaging",
   "displayName": "Agent Messaging Protocol",
-  "description": "Send and receive messages between AI agents using AMP - email for AI agents",
+  "description": "Send and receive messages between AI agents using AMP - secure, cryptographically signed agent messaging",
   "version": "0.1.0",
   "author": "23blocks",
   "license": "Apache-2.0",
