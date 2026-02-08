@@ -193,7 +193,7 @@ AMP_MAX_TOTAL_ATTACHMENT_SIZE="${AMP_MAX_TOTAL_ATTACHMENT_SIZE:-104857600}"  # 1
 AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
 
 # Provider domain (AMP v1)
-AMP_PROVIDER_DOMAIN="aimaestro.local"
+AMP_PROVIDER_DOMAIN="${AMP_PROVIDER_DOMAIN:-aimaestro.local}"
 AMP_LOCAL_DOMAIN="${AMP_PROVIDER_DOMAIN}"
 
 # =============================================================================
@@ -988,9 +988,10 @@ save_to_inbox() {
         if [ "$from_provider" = "local" ] || [ "$from_provider" = "$AMP_LOCAL_DOMAIN" ]; then
             sig_valid="true"
         elif [ -n "$signature" ]; then
-            # For external messages, would need to verify signature
-            # For now, mark as external if signature present
-            sig_valid="true"
+            # External messages: default to unverified
+            # Actual verification requires the sender's public key which
+            # we may not have locally. Mark as false until verified.
+            sig_valid="false"
         fi
 
         # Apply security

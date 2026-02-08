@@ -104,12 +104,18 @@ determine_trust_level() {
         return
     fi
 
-    # Parse sender's address to get tenant
+    # Parse sender's address to get tenant using same logic as parse_address()
+    # For name@tenant.provider.tld, tenant is the segment before the 2-part provider domain
     local sender_tenant=""
     if [[ "$from_address" == *"@"* ]]; then
         local domain="${from_address#*@}"
-        if [[ "$domain" == *"."* ]]; then
-            sender_tenant="${domain%%.*}"
+        IFS='.' read -ra _parts <<< "$domain"
+        local _num_parts=${#_parts[@]}
+        if [ "$_num_parts" -ge 3 ]; then
+            # Provider = last 2 parts, tenant = part before provider
+            sender_tenant="${_parts[$((_num_parts-3))]}"
+        elif [ "$_num_parts" -eq 2 ]; then
+            sender_tenant="${_parts[0]}"
         else
             sender_tenant="default"
         fi
@@ -244,7 +250,8 @@ apply_content_security() {
 # Signature Verification
 # =============================================================================
 
-# Verify message signature
+# Verify message signature using v1.1 canonical format
+# Canonical: from|to|subject|priority|in_reply_to|SHA256(payload)
 # Args: message_json, public_key_file
 # Returns: "true" or "false"
 verify_message_signature() {
@@ -264,18 +271,28 @@ verify_message_signature() {
         return
     fi
 
-    # Create canonical form (envelope without signature + payload, sorted keys)
-    local canonical=$(echo "$message_json" | jq -cS '{
-        envelope: (.envelope | del(.signature)),
-        payload: .payload
-    }')
+    # Extract envelope fields for v1.1 canonical format
+    local from=$(echo "$message_json" | jq -r '.envelope.from // ""')
+    local to=$(echo "$message_json" | jq -r '.envelope.to // ""')
+    local subject=$(echo "$message_json" | jq -r '.envelope.subject // ""')
+    local priority=$(echo "$message_json" | jq -r '.envelope.priority // "normal"')
+    local in_reply_to=$(echo "$message_json" | jq -r '.envelope.in_reply_to // ""')
 
-    # Verify signature using openssl
-    local result=$(echo -n "$canonical" | \
-        ${OPENSSL_BIN:-openssl} pkeyutl -verify -pubin -inkey "$public_key_file" \
-        -sigfile <(echo "$signature" | base64 -d) 2>/dev/null && echo "true" || echo "false")
+    # Compute payload hash: SHA256 of compact JSON payload (no trailing newline)
+    local payload_hash=$(echo "$message_json" | jq -c '.payload' | tr -d '\n' | \
+        ${OPENSSL_BIN:-openssl} dgst -sha256 -hex 2>/dev/null | sed 's/.*= //')
 
-    echo "$result"
+    # Build v1.1 canonical string
+    local canonical="${from}|${to}|${subject}|${priority}|${in_reply_to}|${payload_hash}"
+
+    # Verify using verify_signature helper from amp-helper.sh
+    local result
+    result=$(verify_signature "$canonical" "$signature" "$public_key_file" 2>/dev/null)
+    if [ "$result" = "true" ]; then
+        echo "true"
+    else
+        echo "false"
+    fi
 }
 
 # =============================================================================

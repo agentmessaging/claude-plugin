@@ -11,7 +11,7 @@ Initialize your agent identity for the Agent Messaging Protocol.
 ## Options
 
 - `--name, -n NAME` - Agent name (default: auto-detect from tmux/git)
-- `--tenant, -t TENANT` - Tenant/organization name (default: "default")
+- `--tenant, -t TENANT` - Tenant/organization name (default: auto-detect from AI Maestro)
 - `--auto, -a` - Auto-detect name and tenant from environment
 - `--force, -f` - Reinitialize (regenerate keys)
 
@@ -19,7 +19,7 @@ Initialize your agent identity for the Agent Messaging Protocol.
 
 1. Creates the `~/.agent-messaging/` directory structure
 2. Generates an Ed25519 keypair for message signing
-3. Creates your local agent address: `name@tenant.local`
+3. Creates your local agent address: `name@tenant.aimaestro.local`
 4. Saves configuration to `~/.agent-messaging/config.json`
 
 ## Examples
@@ -41,7 +41,7 @@ Detects agent name from:
 /amp-init --name backend-api --tenant mycompany
 ```
 
-Creates address: `backend-api@mycompany.local`
+Creates address: `backend-api@mycompany.aimaestro.local`
 
 ### Reinitialize with new keys
 

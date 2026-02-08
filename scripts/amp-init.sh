@@ -141,9 +141,9 @@ if [ -z "$NAME" ]; then
 fi
 
 # Validate name
-if [[ ! "$NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+if [[ ! "$NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
     echo "Error: Invalid agent name '${NAME}'"
-    echo "Name must start with alphanumeric and contain only letters, numbers, dots, underscores, and hyphens."
+    echo "Name must start with alphanumeric and contain only letters, numbers, underscores, and hyphens (no dots)."
     exit 1
 fi
 

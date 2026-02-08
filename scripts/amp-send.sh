@@ -120,9 +120,9 @@ if [[ ! "$PRIORITY" =~ ^(low|normal|high|urgent)$ ]]; then
 fi
 
 # Validate type
-if [[ ! "$TYPE" =~ ^(request|response|notification|task|status|alert|update|handoff|ack)$ ]]; then
+if [[ ! "$TYPE" =~ ^(request|response|notification|task|status|alert|update|handoff|ack|system)$ ]]; then
     echo "Error: Invalid type '${TYPE}'"
-    echo "Valid values: request, response, notification, task, status, alert, update, handoff, ack"
+    echo "Valid values: request, response, notification, task, status, alert, update, handoff, ack, system"
     exit 1
 fi
 
@@ -264,7 +264,8 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
                 --arg digest "$local_digest" \
                 --arg scan_status "clean" \
                 --arg uploaded_at "$local_uploaded_at" \
-                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, url: null, scan_status: $scan_status, uploaded_at: $uploaded_at}')
+                --arg expires_at "$(date -u -v+7d '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d '+7 days' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")" \
+                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, url: null, scan_status: $scan_status, uploaded_at: $uploaded_at, expires_at: $expires_at}')
             ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
         done
     fi
@@ -506,6 +507,7 @@ if [ "$ROUTE" = "local" ]; then
                             fingerprint: $fingerprint,
                             registeredAt: $registeredAt
                         }' > "$REG_FILE"
+                    chmod 600 "$REG_FILE"
 
                     echo "  ✅ AMP identity registered"
                     AUTO_REG_SUCCESS=true

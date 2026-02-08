@@ -118,7 +118,7 @@ msg_type=$(echo "$MESSAGE" | jq -r '.payload.type // "notification"')
 body=$(echo "$MESSAGE" | jq -r '.payload.message')
 context=$(echo "$MESSAGE" | jq '.payload.context // null')
 
-status=$(echo "$MESSAGE" | jq -r '.metadata.status // "unread"')
+status=$(echo "$MESSAGE" | jq -r '(.local.status // .metadata.status // "unread")')
 
 # Format timestamp
 ts_display=$(format_timestamp "$timestamp")

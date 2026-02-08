@@ -15,7 +15,7 @@
     "federation"
   ],
   "requirements": {
-    "tools": ["curl", "jq", "openssl"]
+    "tools": ["curl", "jq", "openssl", "base64"]
   },
   "commands": [
     {
@@ -23,6 +23,12 @@
       "description": "Initialize your agent identity and messaging",
       "script": "scripts/amp-init.sh",
       "usage": "amp-init [--name <name>] [--tenant <tenant>] [--auto]"
+    },
+    {
+      "name": "amp-identity",
+      "description": "Quick identity check for context recovery",
+      "script": "scripts/amp-identity.sh",
+      "usage": "amp-identity [--json] [--brief]"
     },
     {
       "name": "amp-status",
@@ -82,7 +88,7 @@
   "skills": [
     {
       "name": "agent-messaging",
-      "file": "skills/agent-messaging/SKILL.md",
+      "file": "skills/messaging/SKILL.md",
       "triggers": [
         "check my messages",
         "send a message",

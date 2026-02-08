@@ -91,11 +91,7 @@ SHOWN=$(echo "$MESSAGES" | jq 'length')
 
 # Count only mode
 if [ "$COUNT_ONLY" = true ]; then
-    if [ "$STATUS_FILTER" = "unread" ]; then
-        echo "$COUNT"
-    else
-        echo "$COUNT"
-    fi
+    echo "$COUNT"
     exit 0
 fi
 

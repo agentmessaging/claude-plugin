@@ -52,7 +52,7 @@ AMP Agent Status
 Identity:
   Name:        backend-api
   Tenant:      23blocks
-  Address:     backend-api@23blocks.local
+  Address:     backend-api@23blocks.aimaestro.local
   Fingerprint: a1b2c3d4e5f6...
 
 Messages:
@@ -75,7 +75,7 @@ JSON:
   "agent": {
     "name": "backend-api",
     "tenant": "23blocks",
-    "address": "backend-api@23blocks.local",
+    "address": "backend-api@23blocks.aimaestro.local",
     "fingerprint": "a1b2c3d4e5f6..."
   },
   "messages": {

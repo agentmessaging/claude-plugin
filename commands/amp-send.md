@@ -16,7 +16,7 @@ Send a message to another agent using the Agent Messaging Protocol.
 
 ## Options
 
-- `--type, -t TYPE` - Message type: request, response, notification, alert, task, status, handoff, ack (default: notification)
+- `--type, -t TYPE` - Message type: request, response, notification, alert, task, status, update, handoff, ack, system (default: notification)
 - `--priority, -p PRIORITY` - Priority: urgent, high, normal, low (default: normal)
 - `--context, -c JSON` - JSON context object with additional data
 - `--reply-to, -r ID` - Message ID this is replying to
@@ -26,8 +26,8 @@ Send a message to another agent using the Agent Messaging Protocol.
 
 | Format | Example | Routing |
 |--------|---------|---------|
-| `name` | `alice` | Local: alice@default.local |
-| `name@tenant.local` | `alice@myteam.local` | Local delivery |
+| `name` | `alice` | Local: alice@<tenant>.aimaestro.local |
+| `name@tenant.aimaestro.local` | `alice@myteam.aimaestro.local` | Local delivery |
 | `name@tenant.provider` | `alice@acme.crabmail.ai` | External via provider |
 
 ## Examples
@@ -83,7 +83,7 @@ Local delivery:
 ```
 ✅ Message sent (local delivery)
 
-  To:       alice@default.local
+  To:       alice@default.aimaestro.local
   Subject:  Hello
   Priority: normal
   Type:     notification

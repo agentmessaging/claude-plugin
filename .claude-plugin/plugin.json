@@ -1,5 +1,5 @@
 {
-  "name": "agent-messaging-protocol",
+  "name": "agent-messaging",
   "version": "0.1.0",
   "description": "Agent Messaging Protocol (AMP) - Secure, cryptographically signed messaging between AI agents across different providers.",
   "homepage": "https://agentmessaging.org",
@@ -20,9 +20,17 @@
     "skills/messaging"
   ],
   "commands": [
+    "commands/amp-init.md",
+    "commands/amp-identity.md",
+    "commands/amp-status.md",
     "commands/amp-send.md",
     "commands/amp-inbox.md",
-    "commands/amp-register.md"
+    "commands/amp-read.md",
+    "commands/amp-reply.md",
+    "commands/amp-delete.md",
+    "commands/amp-register.md",
+    "commands/amp-fetch.md",
+    "commands/amp-download.md"
   ],
   "claude_code_version": ">=1.0.0"
 }
