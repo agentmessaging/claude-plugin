@@ -150,6 +150,7 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
         exit 1
     fi
 
+    TOTAL_ATTACH_SIZE=0
     for attach_file in "${ATTACH_FILES[@]}"; do
         # Check file exists
         if [ ! -f "$attach_file" ]; then
@@ -161,7 +162,15 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
         local_size=$(wc -c < "$attach_file" | tr -d ' ')
         if [ "$local_size" -gt "$AMP_MAX_ATTACHMENT_SIZE" ]; then
             echo "Error: Attachment too large: $(basename "$attach_file") ($(format_file_size "$local_size"))"
-            echo "  Maximum size: $(format_file_size "$AMP_MAX_ATTACHMENT_SIZE")"
+            echo "  Maximum size per file: $(format_file_size "$AMP_MAX_ATTACHMENT_SIZE")"
+            exit 1
+        fi
+
+        # Track total size
+        TOTAL_ATTACH_SIZE=$((TOTAL_ATTACH_SIZE + local_size))
+        if [ "$TOTAL_ATTACH_SIZE" -gt "$AMP_MAX_TOTAL_ATTACHMENT_SIZE" ]; then
+            echo "Error: Total attachment size exceeds limit ($(format_file_size "$TOTAL_ATTACH_SIZE"))"
+            echo "  Maximum total: $(format_file_size "$AMP_MAX_TOTAL_ATTACHMENT_SIZE")"
             exit 1
         fi
 
@@ -223,8 +232,8 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
             ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
 
             scan_status=$(echo "$att_meta" | jq -r '.scan_status')
-            if [ "$scan_status" = "infected" ]; then
-                echo "Error: Attachment flagged as infected: $(basename "$attach_file")"
+            if [ "$scan_status" = "rejected" ]; then
+                echo "Error: Attachment rejected by security scan: $(basename "$attach_file")"
                 exit 1
             fi
         done
@@ -244,6 +253,9 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
             cp "$attach_file" "${local_att_dir}/${local_filename}"
             chmod 600 "${local_att_dir}/${local_filename}"
 
+            local local_uploaded_at
+            local_uploaded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
             att_meta=$(jq -n \
                 --arg id "$local_att_id" \
                 --arg filename "$local_filename" \
@@ -251,7 +263,9 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
                 --argjson size "$local_size" \
                 --arg digest "$local_digest" \
                 --arg scan_status "clean" \
-                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, scan_status: $scan_status, download_url: null}')
+                --arg uploaded_at "$local_uploaded_at" \
+                --arg local_path "${local_att_dir}/${local_filename}" \
+                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, url: null, scan_status: $scan_status, uploaded_at: $uploaded_at, local_path: $local_path}')
             ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
         done
     fi
@@ -308,16 +322,17 @@ send_via_api() {
         --arg message "$MESSAGE" \
         --arg in_reply_to "$REPLY_TO" \
         --argjson context "$CONTEXT" \
+        --argjson attachments "$ATTACHMENTS_JSON" \
         --arg signature "$SIGNATURE" \
         '{
             to: $to,
             subject: $subject,
             priority: $priority,
-            payload: {
+            payload: ({
                 type: $type,
                 message: $message,
                 context: $context
-            },
+            } + (if ($attachments | length) > 0 then {attachments: $attachments} else {} end)),
             in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
             signature: $signature
         }')

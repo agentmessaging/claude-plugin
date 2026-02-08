@@ -165,15 +165,29 @@ AMP_ATTACHMENTS_DIR="${AMP_DIR}/attachments"
 AMP_MAX_ATTACHMENT_SIZE="${AMP_MAX_ATTACHMENT_SIZE:-26214400}"  # 25 MB default
 AMP_MAX_ATTACHMENTS="${AMP_MAX_ATTACHMENTS:-10}"
 AMP_BLOCKED_MIME_TYPES=(
+    # Executables (MUST block per spec)
     "application/x-executable"
     "application/x-msdos-program"
     "application/x-msdownload"
+    "application/x-dosexec"
+    "application/vnd.microsoft.portable-executable"
+    "application/x-mach-o-executable"
+    # Scripts (MUST block per spec)
     "application/x-sh"
     "application/x-shellscript"
+    "application/x-csh"
+    "application/x-perl"
+    "application/x-python-code"
+    "application/hta"
     "application/x-bat"
+    # Packages with executable content (SHOULD block per spec)
+    "application/java-archive"
+    "application/vnd.apple.installer+xml"
+    "application/x-rpm"
+    "application/x-deb"
     "application/x-msi"
-    "application/x-dosexec"
 )
+AMP_MAX_TOTAL_ATTACHMENT_SIZE="${AMP_MAX_TOTAL_ATTACHMENT_SIZE:-104857600}"  # 100 MB total
 
 # AI Maestro connection
 AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
@@ -1317,8 +1331,27 @@ sanitize_filename() {
     local filename="$1"
     # Strip path components
     filename=$(basename "$filename")
+    # Reject double-encoded path separators (spec requirement)
+    if echo "$filename" | grep -qiE '%2[fF]|%5[cC]|%00'; then
+        echo "Error: Filename contains encoded path separators: ${filename}" >&2
+        echo "unnamed_file"
+        return
+    fi
     # Replace unsafe characters with underscores, keep only safe chars
     filename=$(echo "$filename" | sed 's/[^a-zA-Z0-9._-]/_/g')
+    # Strip leading and trailing dots and spaces (spec requirement)
+    filename=$(echo "$filename" | sed 's/^[. ]*//' | sed 's/[. ]*$//')
+    # Enforce max 255 character limit (spec requirement)
+    if [ ${#filename} -gt 255 ]; then
+        local base="${filename%.*}"
+        local ext="${filename##*.}"
+        if [ "$base" = "$ext" ]; then
+            filename="${filename:0:255}"
+        else
+            local max_base=$((255 - ${#ext} - 1))
+            filename="${base:0:$max_base}.${ext}"
+        fi
+    fi
     # Check reserved names (Windows-style)
     local basename_noext="${filename%%.*}"
     local reserved_names="CON PRN AUX NUL COM1 COM2 COM3 COM4 COM5 COM6 COM7 COM8 COM9 LPT1 LPT2 LPT3 LPT4 LPT5 LPT6 LPT7 LPT8 LPT9"
@@ -1472,31 +1505,39 @@ upload_attachment() {
 
         if [ "$status_http" = "200" ]; then
             scan_status=$(echo "$status_result" | jq -r '.scan_status // "clean"')
-            download_url=$(echo "$status_result" | jq -r '.download_url // empty')
+            download_url=$(echo "$status_result" | jq -r '.url // .download_url // empty')
         else
-            # Provider may not support polling — assume clean
-            scan_status="clean"
+            # Provider may not support polling — leave as pending (don't assume clean)
             break
         fi
     done
 
-    # Return attachment metadata
+    # Return attachment metadata (spec uses "url", keep "download_url" as alias)
+    local uploaded_at
+    uploaded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local expires_at
+    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
     jq -n \
         --arg id "$att_id" \
         --arg filename "$filename" \
         --arg content_type "$content_type" \
         --argjson size "$file_size" \
         --arg digest "$digest" \
+        --arg url "$download_url" \
         --arg scan_status "$scan_status" \
-        --arg download_url "$download_url" \
+        --arg uploaded_at "$uploaded_at" \
+        --arg expires_at "$expires_at" \
         '{
             id: $id,
             filename: $filename,
             content_type: $content_type,
             size: $size,
             digest: $digest,
+            url: (if $url == "" then null else $url end),
             scan_status: $scan_status,
-            download_url: (if $download_url == "" then null else $download_url end)
+            uploaded_at: $uploaded_at,
+            expires_at: (if $expires_at == "" then null else $expires_at end)
         }'
 }
 
@@ -1516,7 +1557,7 @@ download_attachment() {
     local expected_digest
     expected_digest=$(echo "$attachment_json" | jq -r '.digest // empty')
     local download_url
-    download_url=$(echo "$attachment_json" | jq -r '.download_url // empty')
+    download_url=$(echo "$attachment_json" | jq -r '.url // .download_url // empty')
 
     filename=$(sanitize_filename "$filename")
     mkdir -p "$dest_dir"
@@ -1536,6 +1577,34 @@ download_attachment() {
         fi
         counter=$((counter + 1))
     done
+
+    # Try local file path first (for filesystem-delivered attachments)
+    local local_path
+    local_path=$(echo "$attachment_json" | jq -r '.local_path // empty')
+    if [ -z "$local_path" ]; then
+        # Check standard local attachment directory
+        local local_candidate="${AMP_ATTACHMENTS_DIR}/${att_id}/${filename}"
+        if [ -f "$local_candidate" ]; then
+            local_path="$local_candidate"
+        fi
+    fi
+
+    if [ -n "$local_path" ] && [ -f "$local_path" ]; then
+        cp "$local_path" "$dest_path"
+        # Verify digest
+        if [ -n "$expected_digest" ]; then
+            local actual_digest
+            actual_digest=$(compute_file_digest "$dest_path")
+            if [ "$actual_digest" != "$expected_digest" ]; then
+                rm -f "$dest_path"
+                echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
+                echo "  The file may have been tampered with." >&2
+                return 1
+            fi
+        fi
+        echo "$dest_path"
+        return 0
+    fi
 
     # Download from URL or provider API
     local dl_http

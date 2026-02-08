@@ -68,7 +68,7 @@ Download directory: /path/to/attachments/
 ## Security
 
 - All downloads are verified against SHA-256 digests
-- Files flagged as `infected` by provider scanning are automatically skipped
+- Files with `rejected` scan status are automatically skipped
 - Download directories are created with `0700` permissions
 - Filenames are sanitized to prevent path traversal
 

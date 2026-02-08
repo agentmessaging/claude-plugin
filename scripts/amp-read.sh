@@ -167,7 +167,7 @@ if [ "$att_count" -gt 0 ]; then
         att_size_display=$(format_file_size "$att_size")
 
         scan_icon="✅"
-        if [ "$att_scan" = "infected" ]; then
+        if [ "$att_scan" = "rejected" ]; then
             scan_icon="🔴"
         elif [ "$att_scan" = "pending" ]; then
             scan_icon="⏳"

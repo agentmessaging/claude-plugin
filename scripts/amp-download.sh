@@ -158,8 +158,8 @@ download_single_attachment() {
     att_scan=$(echo "$att_json" | jq -r '.scan_status // "unknown"')
 
     # Warn about suspicious files
-    if [ "$att_scan" = "infected" ]; then
-        echo "  ⚠️  SKIPPING ${att_filename}: flagged as infected!"
+    if [ "$att_scan" = "rejected" ]; then
+        echo "  ⚠️  SKIPPING ${att_filename}: rejected by security scan!"
         FAILED=$((FAILED + 1))
         return 1
     fi
@@ -186,9 +186,9 @@ if [ "$DOWNLOAD_ALL" = true ]; then
     echo "Downloading ${ATT_COUNT} attachment(s) from ${MESSAGE_ID}..."
     echo ""
 
-    echo "$ATTACHMENTS" | jq -c '.[]' | while read -r att; do
+    while read -r att; do
         download_single_attachment "$att"
-    done
+    done < <(echo "$ATTACHMENTS" | jq -c '.[]')
 else
     # Download specific attachment
     validate_attachment_id "$ATTACHMENT_ID" || exit 1
