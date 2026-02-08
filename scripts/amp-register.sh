@@ -186,7 +186,7 @@ echo ""
 echo "  Provider: ${PROVIDER}"
 echo "  API:      ${API_URL}"
 if [ -n "$USER_KEY" ]; then
-    echo "  Auth:     User Key (${USER_KEY:0:10}...)"
+    echo "  Auth:     User Key (${USER_KEY:0:6}...)"
 fi
 if [ -n "$TENANT" ]; then
     echo "  Tenant:   ${TENANT}"

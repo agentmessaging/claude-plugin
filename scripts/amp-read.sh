@@ -86,12 +86,8 @@ fi
 # Require initialization
 require_init
 
-# Read the message
+# Read the message (set -e will exit on failure)
 MESSAGE=$(read_message "$MESSAGE_ID" "$BOX")
-
-if [ $? -ne 0 ]; then
-    exit 1
-fi
 
 # Mark as read (inbox only)
 if [ "$MARK_READ" = true ] && [ "$BOX" = "inbox" ]; then

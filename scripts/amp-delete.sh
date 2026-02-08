@@ -136,4 +136,10 @@ fi
 # Delete the message
 rm "$MSG_FILE"
 
+# Clean up empty sender/recipient directory
+_parent_dir=$(dirname "$MSG_FILE")
+if [ "$_parent_dir" != "$AMP_INBOX_DIR" ] && [ "$_parent_dir" != "$AMP_SENT_DIR" ]; then
+    rmdir "$_parent_dir" 2>/dev/null || true
+fi
+
 echo "✅ Message deleted"

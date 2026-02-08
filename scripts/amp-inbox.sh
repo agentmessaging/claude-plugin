@@ -48,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --limit|-l)
             LIMIT="$2"
+            if [[ ! "$LIMIT" =~ ^[0-9]+$ ]] || [ "$LIMIT" -eq 0 ]; then
+                echo "Error: --limit must be a positive integer"
+                exit 1
+            fi
             shift 2
             ;;
         --help|-h)

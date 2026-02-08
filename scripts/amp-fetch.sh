@@ -154,8 +154,8 @@ for provider in "${PROVIDERS[@]}"; do
             # Get message ID
             msg_id=$(echo "$msg" | jq -r '.envelope.id // .id')
 
-            # Validate message ID format (security)
-            if [[ ! "$msg_id" =~ ^msg_[0-9]+_[a-f0-9]+$ ]] && [[ ! "$msg_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            # Validate message ID format (security) - use strict format or server-assigned UUIDs
+            if ! validate_message_id "$msg_id" 2>/dev/null && [[ ! "$msg_id" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{3,63}$ ]]; then
                 if [ "$VERBOSE" = true ]; then
                     echo "    Skipping invalid message ID: ${msg_id}"
                 fi
@@ -203,7 +203,7 @@ for provider in "${PROVIDERS[@]}"; do
                     v_subj=$(echo "$msg" | jq -r '.envelope.subject // empty')
                     v_pri=$(echo "$msg" | jq -r '.envelope.priority // "normal"')
                     v_reply=$(echo "$msg" | jq -r '.envelope.in_reply_to // ""')
-                    v_phash=$(echo "$msg" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary | base64 | tr -d '\n')
+                    v_phash=$(echo "$msg" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -hex 2>/dev/null | sed 's/.*= //')
                     v_sdata="${sender_addr}|${v_to}|${v_subj}|${v_pri}|${v_reply}|${v_phash}"
 
                     if verify_signature "$v_sdata" "$signature" "$sender_pubkey"; then

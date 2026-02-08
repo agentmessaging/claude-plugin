@@ -22,6 +22,7 @@ MESSAGE_ID=""
 REPLY_MESSAGE=""
 PRIORITY=""
 TYPE="response"
+ATTACH_FILES=()
 
 show_help() {
     echo "Usage: amp-reply <message-id> <reply-message> [options]"
@@ -35,11 +36,13 @@ show_help() {
     echo "Options:"
     echo "  --priority, -p PRIORITY   Override priority (default: same as original)"
     echo "  --type, -t TYPE           Message type (default: response)"
+    echo "  --attach, -a FILE         Attach a file (can be repeated)"
     echo "  --help, -h                Show this help"
     echo ""
     echo "Examples:"
     echo "  amp-reply msg_1234567890_abc \"Got it, working on it\""
     echo "  amp-reply msg_1234567890_abc \"Urgent update\" --priority urgent"
+    echo "  amp-reply msg_1234567890_abc \"See attached\" --attach report.pdf"
 }
 
 # Parse positional and optional arguments
@@ -52,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --type|-t)
             TYPE="$2"
+            shift 2
+            ;;
+        --attach|-a)
+            ATTACH_FILES+=("$2")
             shift 2
             ;;
         --help|-h)
@@ -80,6 +87,12 @@ fi
 
 MESSAGE_ID="${POSITIONAL[0]}"
 REPLY_MESSAGE="${POSITIONAL[1]}"
+
+# Validate message ID
+validate_message_id "$MESSAGE_ID" || {
+    echo "Error: Invalid message ID format: ${MESSAGE_ID}"
+    exit 1
+}
 
 # Require initialization
 require_init
@@ -116,11 +129,19 @@ fi
 echo "Sending reply to ${ORIGINAL_FROM}..."
 echo ""
 
-# Use the send script with reply-to
-"${SCRIPT_DIR}/amp-send.sh" \
-    "$ORIGINAL_FROM" \
-    "$REPLY_SUBJECT" \
-    "$REPLY_MESSAGE" \
-    --priority "$PRIORITY" \
-    --type "$TYPE" \
+# Build send command
+SEND_ARGS=(
+    "$ORIGINAL_FROM"
+    "$REPLY_SUBJECT"
+    "$REPLY_MESSAGE"
+    --priority "$PRIORITY"
+    --type "$TYPE"
     --reply-to "$MESSAGE_ID"
+)
+
+# Forward attachment flags
+for attach_file in "${ATTACH_FILES[@]}"; do
+    SEND_ARGS+=(--attach "$attach_file")
+done
+
+"${SCRIPT_DIR}/amp-send.sh" "${SEND_ARGS[@]}"

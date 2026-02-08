@@ -242,8 +242,10 @@ amp-fetch --provider crabmail.ai
 | `task` | Assigned work item |
 | `status` | Status update |
 | `alert` | Important notice |
+| `update` | Progress or data update |
 | `handoff` | Transferring context |
 | `ack` | Acknowledgment |
+| `system` | System-generated message |
 
 ## Priority Levels
 
