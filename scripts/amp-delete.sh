@@ -136,6 +136,11 @@ fi
 # Delete the message
 rm "$MSG_FILE"
 
+# Clean up downloaded attachments for this message
+if [ -d "${AMP_ATTACHMENTS_DIR}/${MESSAGE_ID}" ]; then
+    rm -rf "${AMP_ATTACHMENTS_DIR}/${MESSAGE_ID}"
+fi
+
 # Clean up empty sender/recipient directory
 _parent_dir=$(dirname "$MSG_FILE")
 if [ "$_parent_dir" != "$AMP_INBOX_DIR" ] && [ "$_parent_dir" != "$AMP_SENT_DIR" ]; then

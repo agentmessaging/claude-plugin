@@ -126,7 +126,7 @@ fi
 echo ""
 
 # Display messages
-echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
+while read -r msg_b64; do
     msg=$(echo "$msg_b64" | base64 -d)
 
     id=$(echo "$msg" | jq -r '.envelope.id')
@@ -161,7 +161,7 @@ echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
     echo "   Subject: ${subject}${att_indicator}"
     echo "   Date: ${ts_display} | Type: ${msg_type}"
     echo ""
-done
+done < <(echo "$MESSAGES" | jq -r '.[] | @base64')
 
 # Show if there are more
 if [ "$SHOWN" -lt "$COUNT" ]; then

@@ -106,11 +106,8 @@ fi
 # Require initialization
 require_init
 
-# Read the message
+# Read the message (set -e exits on failure automatically)
 MESSAGE=$(read_message "$MESSAGE_ID" "$BOX")
-if [ $? -ne 0 ]; then
-    exit 1
-fi
 
 # Get attachments
 ATTACHMENTS=$(echo "$MESSAGE" | jq '.payload.attachments // []')

@@ -278,9 +278,9 @@ verify_message_signature() {
     local priority=$(echo "$message_json" | jq -r '.envelope.priority // "normal"')
     local in_reply_to=$(echo "$message_json" | jq -r '.envelope.in_reply_to // ""')
 
-    # Compute payload hash: SHA256 of compact JSON payload (no trailing newline)
+    # Compute payload hash: Base64(SHA256(compact_payload)) — must match amp-send.sh signing format
     local payload_hash=$(echo "$message_json" | jq -c '.payload' | tr -d '\n' | \
-        ${OPENSSL_BIN:-openssl} dgst -sha256 -hex 2>/dev/null | sed 's/.*= //')
+        ${OPENSSL_BIN:-openssl} dgst -sha256 -binary 2>/dev/null | base64 | tr -d '\n')
 
     # Build v1.1 canonical string
     local canonical="${from}|${to}|${subject}|${priority}|${in_reply_to}|${payload_hash}"

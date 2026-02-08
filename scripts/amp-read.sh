@@ -152,7 +152,7 @@ if [ "$att_count" -gt 0 ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    echo "$attachments" | jq -r '.[] | @base64' | while read -r att_b64; do
+    while read -r att_b64; do
         att=$(echo "$att_b64" | base64 -d)
         att_id=$(echo "$att" | jq -r '.id')
         att_filename=$(echo "$att" | jq -r '.filename')
@@ -175,7 +175,7 @@ if [ "$att_count" -gt 0 ]; then
 
         echo "  ${scan_icon} ${att_filename} (${att_size_display}, ${att_type})"
         echo "     ID: ${att_id} | Scan: ${att_scan}"
-    done
+    done < <(echo "$attachments" | jq -r '.[] | @base64')
 
     echo ""
 fi

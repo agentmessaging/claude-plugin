@@ -717,14 +717,14 @@ sign_message() {
     # Use temporary files for signing (OpenSSL 3.x has issues with Ed25519 + stdin)
     local tmp_msg=$(mktemp)
     local tmp_sig=$(mktemp)
+    # Ensure temp files are cleaned up even if script exits unexpectedly
+    trap "rm -f '$tmp_msg' '$tmp_sig'" RETURN
 
     echo -n "${message}" > "$tmp_msg"
     # Note: Ed25519 keys require -rawin flag for raw message signing
     if $OPENSSL_BIN pkeyutl -sign -inkey "${private_key}" -rawin -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
         base64 < "$tmp_sig" | tr -d '\n'
     fi
-
-    rm -f "$tmp_msg" "$tmp_sig"
 }
 
 # Verify a signature
@@ -736,6 +736,8 @@ verify_signature() {
     # Use temporary files for verification (Ed25519 requires -rawin flag)
     local tmp_msg=$(mktemp)
     local tmp_sig=$(mktemp)
+    # Ensure temp files are cleaned up even if script exits unexpectedly
+    trap "rm -f '$tmp_msg' '$tmp_sig'" RETURN
 
     echo -n "${message}" > "$tmp_msg"
     echo -n "${signature}" | base64 -d > "$tmp_sig"
@@ -746,7 +748,6 @@ verify_signature() {
         result=0
     fi
 
-    rm -f "$tmp_msg" "$tmp_sig"
     return $result
 }
 
@@ -876,6 +877,7 @@ validate_message_id() {
 }
 
 # Create AMP message envelope
+# Args: to, subject, body, type, priority, in_reply_to, context, thread_id
 create_message() {
     local to="$1"
     local subject="$2"
@@ -884,6 +886,7 @@ create_message() {
     local priority="${5:-normal}"
     local in_reply_to="${6:-}"
     local context="${7:-null}"
+    local explicit_thread_id="${8:-}"
 
     # Must be initialized
     if ! load_config; then
@@ -893,7 +896,14 @@ create_message() {
 
     local id=$(generate_message_id)
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    local thread_id="${in_reply_to:-$id}"
+    # Default expiration: 7 days from now
+    local expires_at
+    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || gdate -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || echo "")
+    # Thread ID: use explicit value if provided (from reply), otherwise use this message's ID
+    local thread_id="${explicit_thread_id:-$id}"
 
     # Parse destination address
     parse_address "$to"
@@ -910,6 +920,7 @@ create_message() {
         --arg timestamp "$timestamp" \
         --arg thread_id "$thread_id" \
         --arg in_reply_to "$in_reply_to" \
+        --arg expires_at "$expires_at" \
         --arg type "$type" \
         --arg body "$body" \
         --argjson context "$context" \
@@ -924,7 +935,7 @@ create_message() {
                 timestamp: $timestamp,
                 thread_id: $thread_id,
                 in_reply_to: (if $in_reply_to == "" then null else $in_reply_to end),
-                expires_at: null,
+                expires_at: (if $expires_at == "" then null else $expires_at end),
                 signature: null
             },
             payload: {
@@ -976,16 +987,14 @@ save_to_inbox() {
         local signature=$(echo "$message_json" | jq -r '.envelope.signature // empty')
         local sig_valid="false"
 
-        # For local messages (same machine), trust them
-        local from_provider=""
-        if [[ "$from" == *"@"* ]]; then
-            local domain="${from#*@}"
-            if [[ "$domain" == *"."* ]]; then
-                from_provider="${domain#*.}"
-            fi
-        fi
+        # For local messages (same provider domain), trust them
+        # Use parse_address for proper provider extraction (prevents trusting arbitrary .local domains)
+        local _save_from_provider=""
+        parse_address "$from"
+        _save_from_provider="$ADDR_PROVIDER"
 
-        if [ "$from_provider" = "local" ] || [ "$from_provider" = "$AMP_LOCAL_DOMAIN" ]; then
+        if [ "$_save_from_provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
+           [ "$_save_from_provider" = "aimaestro.local" ]; then
             sig_valid="true"
         elif [ -n "$signature" ]; then
             # External messages: default to unverified
@@ -1461,7 +1470,14 @@ upload_attachment() {
     upload_url=$(echo "$init_result" | jq -r '.upload_url // empty')
     local server_att_id
     server_att_id=$(echo "$init_result" | jq -r '.attachment_id // empty')
-    [ -n "$server_att_id" ] && att_id="$server_att_id"
+    if [ -n "$server_att_id" ] && [ "$server_att_id" != "$att_id" ]; then
+        # Validate server-assigned ID before accepting
+        if validate_attachment_id "$server_att_id" 2>/dev/null; then
+            att_id="$server_att_id"
+        else
+            echo "Warning: Server returned invalid attachment ID, using client-generated ID" >&2
+        fi
+    fi
 
     # Step 2: Upload the file content
     if [ -n "$upload_url" ]; then

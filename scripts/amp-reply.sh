@@ -129,7 +129,7 @@ fi
 echo "Sending reply to ${ORIGINAL_FROM}..."
 echo ""
 
-# Build send command
+# Build send command (propagate thread_id from original message for correct threading)
 SEND_ARGS=(
     "$ORIGINAL_FROM"
     "$REPLY_SUBJECT"
@@ -137,6 +137,7 @@ SEND_ARGS=(
     --priority "$PRIORITY"
     --type "$TYPE"
     --reply-to "$MESSAGE_ID"
+    --thread-id "$ORIGINAL_THREAD"
 )
 
 # Forward attachment flags

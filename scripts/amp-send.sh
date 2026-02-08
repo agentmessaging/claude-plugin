@@ -28,6 +28,7 @@ MESSAGE=""
 PRIORITY="normal"
 TYPE="notification"
 REPLY_TO=""
+THREAD_ID=""
 CONTEXT="null"
 ATTACH_FILES=()
 
@@ -74,6 +75,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --reply-to|-r)
             REPLY_TO="$2"
+            shift 2
+            ;;
+        --thread-id)
+            THREAD_ID="$2"
             shift 2
             ;;
         --context|-c)
@@ -190,7 +195,7 @@ fi
 ROUTE=$(get_message_route "$RECIPIENT")
 
 # Create the message
-MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIORITY" "$REPLY_TO" "$CONTEXT")
+MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIORITY" "$REPLY_TO" "$CONTEXT" "$THREAD_ID")
 
 # =============================================================================
 # Upload Attachments (if any, and we have API credentials)
@@ -630,13 +635,14 @@ else
     # Add signature to message
     MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --arg sig "$SIGNATURE" '.envelope.signature = $sig')
 
-    # Send full AMP envelope to external provider
+    # Send full AMP envelope to external provider (strip internal metadata/local fields)
+    EXT_SEND_BODY=$(echo "$MESSAGE_JSON" | jq 'del(.metadata, .local)')
     EXT_SEND_URL="${ROUTE_URL:-${API_URL}/v1/route}"
     RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
         -X POST "${EXT_SEND_URL}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${API_KEY}" \
-        -d "$MESSAGE_JSON")
+        -d "$EXT_SEND_BODY")
 
     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
     BODY=$(echo "$RESPONSE" | sed '$d')

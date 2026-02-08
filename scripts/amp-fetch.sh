@@ -203,7 +203,7 @@ for provider in "${PROVIDERS[@]}"; do
                     v_subj=$(echo "$msg" | jq -r '.envelope.subject // empty')
                     v_pri=$(echo "$msg" | jq -r '.envelope.priority // "normal"')
                     v_reply=$(echo "$msg" | jq -r '.envelope.in_reply_to // ""')
-                    v_phash=$(echo "$msg" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -hex 2>/dev/null | sed 's/.*= //')
+                    v_phash=$(echo "$msg" | jq -c '.payload' | tr -d '\n' | $OPENSSL_BIN dgst -sha256 -binary 2>/dev/null | base64 | tr -d '\n')
                     v_sdata="${sender_addr}|${v_to}|${v_subj}|${v_pri}|${v_reply}|${v_phash}"
 
                     if verify_signature "$v_sdata" "$signature" "$sender_pubkey"; then
