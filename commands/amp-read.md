@@ -81,11 +81,18 @@ CONTEXT
 }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ATTACHMENTS (2)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✅ att_1234_abc  report.pdf       (245.3 KB, application/pdf)
+  ✅ att_1234_def  screenshot.png   (1.2 MB, image/png)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✓ Marked as read
 
 Actions:
-  Reply:   amp-reply msg_1706648400_abc123 "Your reply message"
-  Delete:  amp-delete msg_1706648400_abc123
+  Reply:    amp-reply msg_1706648400_abc123 "Your reply message"
+  Delete:   amp-delete msg_1706648400_abc123
+  Download: amp-download msg_1706648400_abc123 --all
 ```
 
 ## Message Not Found

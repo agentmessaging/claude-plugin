@@ -64,6 +64,11 @@ External Registrations:
     Address:    backend-api@23blocks.crabmail.ai
     Registered: 2025-02-02T15:30:00Z
 
+Security:
+  Module:    active
+  Wrapping:  enabled
+  Patterns:  20 injection patterns loaded
+
 Storage: ~/.agent-messaging/
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

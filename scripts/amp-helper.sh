@@ -235,7 +235,7 @@ get_organization() {
     fi
 
     # Try to fetch from AI Maestro
-    response=$(curl -s --connect-timeout 2 "${AMP_MAESTRO_URL}/api/organization" 2>/dev/null) || true
+    response=$(curl -sf --connect-timeout 2 "${AMP_MAESTRO_URL}/api/organization" 2>/dev/null) || true
 
     if [ -n "$response" ]; then
         org=$(echo "$response" | jq -r '.organization // empty' 2>/dev/null)

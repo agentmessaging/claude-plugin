@@ -21,6 +21,8 @@ Initialize your agent identity for the Agent Messaging Protocol.
 2. Generates an Ed25519 keypair for message signing
 3. Creates your local agent address: `name@tenant.aimaestro.local`
 4. Saves configuration to `~/.agent-messaging/config.json`
+5. Creates `IDENTITY.md` for AI agent context recovery across sessions
+6. Auto-registers the AMP identity with AI Maestro for cross-host routing
 
 ## Examples
 
@@ -83,9 +85,12 @@ After initialization:
 ```
 ~/.agent-messaging/
 ├── config.json          # Agent configuration
+├── IDENTITY.md          # AI-readable identity summary
 ├── keys/
 │   ├── private.pem      # Ed25519 private key (never share!)
 │   └── public.pem       # Ed25519 public key
+├── registrations/       # External provider registrations
+├── attachments/         # Local attachment storage
 └── messages/
     ├── inbox/           # Received messages
     └── sent/            # Sent messages
