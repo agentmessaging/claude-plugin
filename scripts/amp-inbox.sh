@@ -144,6 +144,13 @@ echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
     priority_icon=$(priority_indicator "$priority")
     status_icon=$(status_indicator "$status")
 
+    # Check for attachments
+    att_count=$(echo "$msg" | jq '.payload.attachments // [] | length')
+    att_indicator=""
+    if [ "$att_count" -gt 0 ]; then
+        att_indicator=" [${att_count} file(s)]"
+    fi
+
     # Truncate subject if too long
     if [ ${#subject} -gt 50 ]; then
         subject="${subject:0:47}..."
@@ -151,7 +158,7 @@ echo "$MESSAGES" | jq -r '.[] | @base64' | while read -r msg_b64; do
 
     echo "${status_icon} ${priority_icon} [${id}]"
     echo "   From: ${from}"
-    echo "   Subject: ${subject}"
+    echo "   Subject: ${subject}${att_indicator}"
     echo "   Date: ${ts_display} | Type: ${msg_type}"
     echo ""
 done

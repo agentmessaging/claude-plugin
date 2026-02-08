@@ -71,6 +71,12 @@
       "description": "Fetch new messages from external providers",
       "script": "scripts/amp-fetch.sh",
       "usage": "amp-fetch [--provider <provider>] [--verbose]"
+    },
+    {
+      "name": "amp-download",
+      "description": "Download attachments from a message",
+      "script": "scripts/amp-download.sh",
+      "usage": "amp-download <message-id> [attachment-id|--all] [--dest DIR] [--sent]"
     }
   ],
   "skills": [
@@ -83,7 +89,10 @@
         "reply to",
         "read message",
         "inbox",
-        "message from"
+        "message from",
+        "send file",
+        "attach file",
+        "download attachment"
       ]
     }
   ],
@@ -93,6 +102,7 @@
     "keys": "keys/",
     "inbox": "messages/inbox/",
     "sent": "messages/sent/",
-    "registrations": "registrations/"
+    "registrations": "registrations/",
+    "attachments": "attachments/"
   }
 }

@@ -159,6 +159,21 @@ AMP_MESSAGES_DIR="${AMP_DIR}/messages"
 AMP_INBOX_DIR="${AMP_MESSAGES_DIR}/inbox"
 AMP_SENT_DIR="${AMP_MESSAGES_DIR}/sent"
 AMP_REGISTRATIONS_DIR="${AMP_DIR}/registrations"
+AMP_ATTACHMENTS_DIR="${AMP_DIR}/attachments"
+
+# Attachment limits
+AMP_MAX_ATTACHMENT_SIZE="${AMP_MAX_ATTACHMENT_SIZE:-26214400}"  # 25 MB default
+AMP_MAX_ATTACHMENTS="${AMP_MAX_ATTACHMENTS:-10}"
+AMP_BLOCKED_MIME_TYPES=(
+    "application/x-executable"
+    "application/x-msdos-program"
+    "application/x-msdownload"
+    "application/x-sh"
+    "application/x-shellscript"
+    "application/x-bat"
+    "application/x-msi"
+    "application/x-dosexec"
+)
 
 # AI Maestro connection
 AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
@@ -177,9 +192,11 @@ ensure_amp_dirs() {
     mkdir -p "${AMP_MESSAGES_DIR}/inbox"
     mkdir -p "${AMP_MESSAGES_DIR}/sent"
     mkdir -p "${AMP_REGISTRATIONS_DIR}"
+    mkdir -p "${AMP_ATTACHMENTS_DIR}"
 
-    # Secure permissions for keys directory
+    # Secure permissions for keys and attachments directories
     chmod 700 "${AMP_KEYS_DIR}"
+    chmod 700 "${AMP_ATTACHMENTS_DIR}"
 }
 
 # =============================================================================
@@ -1250,6 +1267,314 @@ detect_agent_name() {
     #    the agent's config with a wrong identity. Better to fail loudly.
     echo ""
     return 1
+}
+
+# =============================================================================
+# Initialization Check
+# =============================================================================
+
+# =============================================================================
+# Attachment Functions
+# =============================================================================
+
+# Generate attachment ID
+generate_attachment_id() {
+    local timestamp
+    if timestamp=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null); then
+        : # got millisecond timestamp
+    else
+        timestamp="$(date +%s)000"
+    fi
+    local random
+    random=$(head -c 4 /dev/urandom | xxd -p)
+    echo "att_${timestamp}_${random}"
+}
+
+# Validate attachment ID format (security: prevent path traversal)
+validate_attachment_id() {
+    local id="$1"
+    if [[ ! "$id" =~ ^att[_-][0-9]+[_-][a-zA-Z0-9]+$ ]]; then
+        echo "Error: Invalid attachment ID format: ${id}" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Compute file digest (sha256:<hex>)
+compute_file_digest() {
+    local filepath="$1"
+    local hash
+    if command -v sha256sum &>/dev/null; then
+        hash=$(sha256sum "$filepath" | awk '{print $1}')
+    else
+        hash=$($OPENSSL_BIN dgst -sha256 -hex "$filepath" 2>/dev/null | awk '{print $NF}')
+    fi
+    echo "sha256:${hash}"
+}
+
+# Sanitize filename for safe storage
+sanitize_filename() {
+    local filename="$1"
+    # Strip path components
+    filename=$(basename "$filename")
+    # Replace unsafe characters with underscores, keep only safe chars
+    filename=$(echo "$filename" | sed 's/[^a-zA-Z0-9._-]/_/g')
+    # Check reserved names (Windows-style)
+    local basename_noext="${filename%%.*}"
+    local reserved_names="CON PRN AUX NUL COM1 COM2 COM3 COM4 COM5 COM6 COM7 COM8 COM9 LPT1 LPT2 LPT3 LPT4 LPT5 LPT6 LPT7 LPT8 LPT9"
+    local upper_basename
+    upper_basename=$(echo "$basename_noext" | tr '[:lower:]' '[:upper:]')
+    for reserved in $reserved_names; do
+        if [ "$upper_basename" = "$reserved" ]; then
+            filename="_${filename}"
+            break
+        fi
+    done
+    # Ensure not empty
+    [ -z "$filename" ] && filename="unnamed_file"
+    echo "$filename"
+}
+
+# Detect MIME type of a file
+detect_mime_type() {
+    local filepath="$1"
+    if command -v file &>/dev/null; then
+        file --mime-type -b "$filepath" 2>/dev/null || echo "application/octet-stream"
+    else
+        echo "application/octet-stream"
+    fi
+}
+
+# Format file size for human-readable display
+format_file_size() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1073741824 ]; then
+        echo "$(( bytes / 1073741824 )).$(( (bytes % 1073741824) * 10 / 1073741824 )) GB"
+    elif [ "$bytes" -ge 1048576 ]; then
+        echo "$(( bytes / 1048576 )).$(( (bytes % 1048576) * 10 / 1048576 )) MB"
+    elif [ "$bytes" -ge 1024 ]; then
+        echo "$(( bytes / 1024 )).$(( (bytes % 1024) * 10 / 1024 )) KB"
+    else
+        echo "${bytes} B"
+    fi
+}
+
+# Check if MIME type is blocked
+is_mime_blocked() {
+    local mime="$1"
+    for blocked in "${AMP_BLOCKED_MIME_TYPES[@]}"; do
+        if [ "$mime" = "$blocked" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Upload an attachment via provider API
+# Args: filepath, api_url, api_key
+# Returns: JSON with attachment metadata (id, upload_url, etc.)
+upload_attachment() {
+    local filepath="$1"
+    local api_url="$2"
+    local api_key="$3"
+
+    local filename
+    filename=$(sanitize_filename "$(basename "$filepath")")
+    local content_type
+    content_type=$(detect_mime_type "$filepath")
+    local file_size
+    file_size=$(wc -c < "$filepath" | tr -d ' ')
+    local digest
+    digest=$(compute_file_digest "$filepath")
+    local att_id
+    att_id=$(generate_attachment_id)
+
+    # Step 1: Request upload URL from provider
+    local init_body
+    init_body=$(jq -n \
+        --arg filename "$filename" \
+        --arg content_type "$content_type" \
+        --argjson size "$file_size" \
+        --arg digest "$digest" \
+        '{filename: $filename, content_type: $content_type, size: $size, digest: $digest}')
+
+    local init_response
+    init_response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
+        -X POST "${api_url}/attachments/upload" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${api_key}" \
+        -d "$init_body" 2>&1)
+
+    local init_http
+    init_http=$(echo "$init_response" | tail -n1)
+    local init_result
+    init_result=$(echo "$init_response" | sed '$d')
+
+    if [ "$init_http" != "200" ] && [ "$init_http" != "201" ]; then
+        echo "Error: Failed to initiate attachment upload (HTTP ${init_http})" >&2
+        local err_msg
+        err_msg=$(echo "$init_result" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)
+        [ -n "$err_msg" ] && [ "$err_msg" != "null" ] && echo "  ${err_msg}" >&2
+        return 1
+    fi
+
+    local upload_url
+    upload_url=$(echo "$init_result" | jq -r '.upload_url // empty')
+    local server_att_id
+    server_att_id=$(echo "$init_result" | jq -r '.attachment_id // empty')
+    [ -n "$server_att_id" ] && att_id="$server_att_id"
+
+    # Step 2: Upload the file content
+    if [ -n "$upload_url" ]; then
+        local upload_response
+        upload_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
+            -X PUT "$upload_url" \
+            -H "Content-Type: ${content_type}" \
+            --data-binary "@${filepath}" 2>&1)
+
+        local upload_http
+        upload_http=$(echo "$upload_response" | tail -n1)
+
+        if [ "$upload_http" != "200" ] && [ "$upload_http" != "201" ]; then
+            echo "Error: Failed to upload attachment content (HTTP ${upload_http})" >&2
+            return 1
+        fi
+    fi
+
+    # Step 3: Confirm upload
+    local confirm_response
+    confirm_response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 \
+        -X POST "${api_url}/attachments/${att_id}/confirm" \
+        -H "Authorization: Bearer ${api_key}" 2>&1)
+
+    local confirm_http
+    confirm_http=$(echo "$confirm_response" | tail -n1)
+    local confirm_result
+    confirm_result=$(echo "$confirm_response" | sed '$d')
+
+    # Step 4: Poll for scan status (up to 30 seconds)
+    local scan_status="pending"
+    local download_url=""
+    local poll_count=0
+    while [ "$scan_status" = "pending" ] && [ "$poll_count" -lt 6 ]; do
+        sleep 5
+        poll_count=$((poll_count + 1))
+
+        local status_response
+        status_response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 10 \
+            -X GET "${api_url}/attachments/${att_id}" \
+            -H "Authorization: Bearer ${api_key}" 2>&1)
+
+        local status_http
+        status_http=$(echo "$status_response" | tail -n1)
+        local status_result
+        status_result=$(echo "$status_response" | sed '$d')
+
+        if [ "$status_http" = "200" ]; then
+            scan_status=$(echo "$status_result" | jq -r '.scan_status // "clean"')
+            download_url=$(echo "$status_result" | jq -r '.download_url // empty')
+        else
+            # Provider may not support polling — assume clean
+            scan_status="clean"
+            break
+        fi
+    done
+
+    # Return attachment metadata
+    jq -n \
+        --arg id "$att_id" \
+        --arg filename "$filename" \
+        --arg content_type "$content_type" \
+        --argjson size "$file_size" \
+        --arg digest "$digest" \
+        --arg scan_status "$scan_status" \
+        --arg download_url "$download_url" \
+        '{
+            id: $id,
+            filename: $filename,
+            content_type: $content_type,
+            size: $size,
+            digest: $digest,
+            scan_status: $scan_status,
+            download_url: (if $download_url == "" then null else $download_url end)
+        }'
+}
+
+# Download an attachment with digest verification
+# Args: attachment_json, dest_dir, [api_url, api_key]
+# Returns: path to downloaded file
+download_attachment() {
+    local attachment_json="$1"
+    local dest_dir="$2"
+    local api_url="${3:-}"
+    local api_key="${4:-}"
+
+    local att_id
+    att_id=$(echo "$attachment_json" | jq -r '.id')
+    local filename
+    filename=$(echo "$attachment_json" | jq -r '.filename')
+    local expected_digest
+    expected_digest=$(echo "$attachment_json" | jq -r '.digest // empty')
+    local download_url
+    download_url=$(echo "$attachment_json" | jq -r '.download_url // empty')
+
+    filename=$(sanitize_filename "$filename")
+    mkdir -p "$dest_dir"
+    chmod 700 "$dest_dir"
+
+    local dest_path="${dest_dir}/${filename}"
+
+    # Handle filename collisions
+    local counter=1
+    while [ -f "$dest_path" ]; do
+        local base="${filename%.*}"
+        local ext="${filename##*.}"
+        if [ "$base" = "$ext" ]; then
+            dest_path="${dest_dir}/${base}_${counter}"
+        else
+            dest_path="${dest_dir}/${base}_${counter}.${ext}"
+        fi
+        counter=$((counter + 1))
+    done
+
+    # Download from URL or provider API
+    local dl_http
+    if [ -n "$download_url" ]; then
+        local dl_response
+        dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
+            -o "$dest_path" "$download_url" 2>&1)
+        dl_http=$(echo "$dl_response" | tail -n1)
+    elif [ -n "$api_url" ] && [ -n "$api_key" ]; then
+        local dl_response
+        dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
+            -o "$dest_path" \
+            -H "Authorization: Bearer ${api_key}" \
+            "${api_url}/attachments/${att_id}/download" 2>&1)
+        dl_http=$(echo "$dl_response" | tail -n1)
+    else
+        echo "Error: No download URL or API credentials available" >&2
+        return 1
+    fi
+
+    if [ "$dl_http" != "200" ]; then
+        rm -f "$dest_path"
+        echo "Error: Failed to download attachment (HTTP ${dl_http})" >&2
+        return 1
+    fi
+
+    # Verify digest
+    if [ -n "$expected_digest" ]; then
+        local actual_digest
+        actual_digest=$(compute_file_digest "$dest_path")
+        if [ "$actual_digest" != "$expected_digest" ]; then
+            rm -f "$dest_path"
+            echo "Error: Digest mismatch! Expected ${expected_digest}, got ${actual_digest}" >&2
+            echo "  The file may have been tampered with." >&2
+            return 1
+        fi
+    fi
+
+    echo "$dest_path"
 }
 
 # =============================================================================

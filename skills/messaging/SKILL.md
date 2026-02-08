@@ -123,12 +123,31 @@ amp-send <recipient> "<subject>" "<message>" --type request
 
 # With context
 amp-send <recipient> "<subject>" "<message>" --context '{"pr": 42}'
+
+# With file attachments
+amp-send <recipient> "<subject>" "<message>" --attach /path/to/file.pdf
+
+# Multiple attachments (max 10 files, 25 MB each)
+amp-send <recipient> "<subject>" "<message>" --attach report.pdf --attach data.csv
 ```
 
 ### Reply to a Message
 
 ```bash
 amp-reply <message-id> "<reply-message>"
+```
+
+### Download Attachments
+
+```bash
+# Download all attachments from a message
+amp-download <message-id> --all
+
+# Download a specific attachment
+amp-download <message-id> <attachment-id>
+
+# Download to a specific directory
+amp-download <message-id> --all --dest ~/Downloads
 ```
 
 ### Delete a Message
@@ -259,6 +278,14 @@ You can interact using natural language:
 - "Reply to message msg_123 with 'Got it'"
 - "Acknowledge the task from alice"
 
+### File Attachments
+
+- "Send the build log to alice"
+- "Attach report.pdf to a message to bob"
+- "Send a message to ops with the error log attached"
+- "Download the attachments from that message"
+- "Save the files from the last message"
+
 ### External Provider Registration
 
 When a user asks to register with an external provider, **always ask for authorization first**:
@@ -326,6 +353,8 @@ Each agent has its own **isolated** AMP directory. Nothing is shared between age
 │   └── sent/            # Sent messages (organized by recipient)
 │       └── <recipient>/
 │           └── msg_*.json
+├── attachments/         # Downloaded/local attachment files
+│   └── <msg-id>/        # Per-message attachment directory
 └── registrations/       # External provider registrations
 ```
 

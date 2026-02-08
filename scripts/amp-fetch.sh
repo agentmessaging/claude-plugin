@@ -251,6 +251,21 @@ for provider in "${PROVIDERS[@]}"; do
                 echo "      Subject: ${subject}"
             fi
 
+            # Check for suspicious attachments
+            fetch_att_count=$(echo "$msg" | jq '.payload.attachments // [] | length' 2>/dev/null || echo "0")
+            if [ "$fetch_att_count" -gt 0 ]; then
+                echo "$msg" | jq -r '.payload.attachments[]? | @base64' 2>/dev/null | while read -r fetch_att_b64; do
+                    fetch_att=$(echo "$fetch_att_b64" | base64 -d)
+                    fetch_scan=$(echo "$fetch_att" | jq -r '.scan_status // "unknown"')
+                    fetch_att_name=$(echo "$fetch_att" | jq -r '.filename // "unknown"')
+                    if [ "$fetch_scan" = "infected" ]; then
+                        echo "    ⚠️  WARNING: Attachment '${fetch_att_name}' flagged as infected!"
+                    elif [ "$fetch_scan" = "pending" ] || [ "$fetch_scan" = "unknown" ]; then
+                        echo "    ⚠️  Attachment '${fetch_att_name}' scan status: ${fetch_scan}"
+                    fi
+                done
+            fi
+
             TOTAL_NEW=$((TOTAL_NEW + 1))
 
             # Mark as fetched on provider (if enabled)

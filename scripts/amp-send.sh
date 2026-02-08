@@ -29,6 +29,7 @@ PRIORITY="normal"
 TYPE="notification"
 REPLY_TO=""
 CONTEXT="null"
+ATTACH_FILES=()
 
 show_help() {
     echo "Usage: amp-send <recipient> <subject> <message> [options]"
@@ -45,6 +46,7 @@ show_help() {
     echo "  --type, -t TYPE           request|response|notification|task|status (default: notification)"
     echo "  --reply-to, -r ID         Message ID this is replying to"
     echo "  --context, -c JSON        Additional context as JSON"
+    echo "  --attach, -a FILE         Attach a file (repeatable, max ${AMP_MAX_ATTACHMENTS})"
     echo "  --help, -h                Show this help"
     echo ""
     echo "Address formats:"
@@ -76,6 +78,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --context|-c)
             CONTEXT="$2"
+            shift 2
+            ;;
+        --attach|-a)
+            ATTACH_FILES+=("$2")
             shift 2
             ;;
         --help|-h)
@@ -131,11 +137,128 @@ fi
 # Require initialization
 require_init
 
+# =============================================================================
+# Attachment Validation
+# =============================================================================
+
+ATTACHMENTS_JSON="[]"
+
+if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
+    # Check attachment count limit
+    if [ ${#ATTACH_FILES[@]} -gt "$AMP_MAX_ATTACHMENTS" ]; then
+        echo "Error: Too many attachments (${#ATTACH_FILES[@]}). Maximum is ${AMP_MAX_ATTACHMENTS}."
+        exit 1
+    fi
+
+    for attach_file in "${ATTACH_FILES[@]}"; do
+        # Check file exists
+        if [ ! -f "$attach_file" ]; then
+            echo "Error: Attachment not found: ${attach_file}"
+            exit 1
+        fi
+
+        # Check file size
+        local_size=$(wc -c < "$attach_file" | tr -d ' ')
+        if [ "$local_size" -gt "$AMP_MAX_ATTACHMENT_SIZE" ]; then
+            echo "Error: Attachment too large: $(basename "$attach_file") ($(format_file_size "$local_size"))"
+            echo "  Maximum size: $(format_file_size "$AMP_MAX_ATTACHMENT_SIZE")"
+            exit 1
+        fi
+
+        # Check MIME type
+        local_mime=$(detect_mime_type "$attach_file")
+        if is_mime_blocked "$local_mime"; then
+            echo "Error: Blocked file type: ${local_mime} ($(basename "$attach_file"))"
+            echo "  Executable and script files are not allowed as attachments."
+            exit 1
+        fi
+
+        echo "  Preparing attachment: $(basename "$attach_file") ($(format_file_size "$local_size"))"
+    done
+fi
+
 # Determine routing
 ROUTE=$(get_message_route "$RECIPIENT")
 
 # Create the message
 MESSAGE_JSON=$(create_message "$RECIPIENT" "$SUBJECT" "$MESSAGE" "$TYPE" "$PRIORITY" "$REPLY_TO" "$CONTEXT")
+
+# =============================================================================
+# Upload Attachments (if any, and we have API credentials)
+# =============================================================================
+
+if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
+    # Find API credentials for upload
+    UPLOAD_API_URL=""
+    UPLOAD_API_KEY=""
+
+    # Try AI Maestro registration first
+    for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
+        [ -f "$provider_file" ] || continue
+        prov=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
+        if [ "$prov" = "aimaestro.local" ] || [ "$prov" = "${AMP_PROVIDER_DOMAIN}" ]; then
+            UPLOAD_API_URL=$(jq -r '.apiUrl' "$provider_file" 2>/dev/null)
+            UPLOAD_API_KEY=$(jq -r '.apiKey' "$provider_file" 2>/dev/null)
+            break
+        fi
+    done
+
+    # Fall back to external provider registration if external route
+    if [ -z "$UPLOAD_API_URL" ] && [ "$ROUTE" != "local" ]; then
+        REG_FILE="${AMP_REGISTRATIONS_DIR}/${ROUTE}.json"
+        if [ -f "$REG_FILE" ]; then
+            UPLOAD_API_URL=$(jq -r '.apiUrl' "$REG_FILE" 2>/dev/null)
+            UPLOAD_API_KEY=$(jq -r '.apiKey' "$REG_FILE" 2>/dev/null)
+        fi
+    fi
+
+    if [ -n "$UPLOAD_API_URL" ] && [ -n "$UPLOAD_API_KEY" ]; then
+        for attach_file in "${ATTACH_FILES[@]}"; do
+            echo "  Uploading: $(basename "$attach_file")..."
+            att_meta=$(upload_attachment "$attach_file" "$UPLOAD_API_URL" "$UPLOAD_API_KEY")
+            if [ $? -ne 0 ]; then
+                echo "Error: Failed to upload attachment: $(basename "$attach_file")"
+                exit 1
+            fi
+            ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
+
+            scan_status=$(echo "$att_meta" | jq -r '.scan_status')
+            if [ "$scan_status" = "infected" ]; then
+                echo "Error: Attachment flagged as infected: $(basename "$attach_file")"
+                exit 1
+            fi
+        done
+    else
+        # No API — create local attachment metadata (for filesystem delivery)
+        for attach_file in "${ATTACH_FILES[@]}"; do
+            local_att_id=$(generate_attachment_id)
+            local_filename=$(sanitize_filename "$(basename "$attach_file")")
+            local_mime=$(detect_mime_type "$attach_file")
+            local_size=$(wc -c < "$attach_file" | tr -d ' ')
+            local_digest=$(compute_file_digest "$attach_file")
+
+            # Copy file to attachments directory
+            ensure_amp_dirs
+            local_att_dir="${AMP_ATTACHMENTS_DIR}/${local_att_id}"
+            mkdir -p "$local_att_dir"
+            cp "$attach_file" "${local_att_dir}/${local_filename}"
+            chmod 600 "${local_att_dir}/${local_filename}"
+
+            att_meta=$(jq -n \
+                --arg id "$local_att_id" \
+                --arg filename "$local_filename" \
+                --arg content_type "$local_mime" \
+                --argjson size "$local_size" \
+                --arg digest "$local_digest" \
+                --arg scan_status "clean" \
+                '{id: $id, filename: $filename, content_type: $content_type, size: $size, digest: $digest, scan_status: $scan_status, download_url: null}')
+            ATTACHMENTS_JSON=$(echo "$ATTACHMENTS_JSON" | jq --argjson att "$att_meta" '. + [$att]')
+        done
+    fi
+
+    # Inject attachments array into message payload
+    MESSAGE_JSON=$(echo "$MESSAGE_JSON" | jq --argjson atts "$ATTACHMENTS_JSON" '.payload.attachments = $atts')
+fi
 
 # =============================================================================
 # Sign the message (required for all delivery methods)
@@ -232,6 +355,13 @@ send_via_api() {
         echo "  ID:       ${msg_id}"
         echo "  Status:   ${delivery_status}"
         echo "  Method:   ${delivery_method}"
+
+        local att_count
+        att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
+        if [ "$att_count" -gt 0 ]; then
+            echo "  Attach:   ${att_count} file(s)"
+        fi
+
         return 0
     else
         echo "❌ Failed to send via ${label} (HTTP ${http_code})"
@@ -420,6 +550,12 @@ if [ "$ROUTE" = "local" ]; then
                 echo "  Priority: ${PRIORITY}"
                 echo "  Type:     ${TYPE}"
                 echo "  ID:       ${MSG_ID}"
+
+                local fs_att_count
+                fs_att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
+                if [ "$fs_att_count" -gt 0 ]; then
+                    echo "  Attach:   ${fs_att_count} file(s)"
+                fi
             else
                 # Recipient NOT on this machine AND no AMP registration
                 echo "❌ Cannot deliver message to '${FULL_RECIPIENT}'"
@@ -506,6 +642,12 @@ else
         echo "  Type:     ${TYPE}"
         echo "  ID:       ${MSG_ID}"
         echo "  Status:   ${DELIVERY_STATUS}"
+
+        local ext_att_count
+        ext_att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
+        if [ "$ext_att_count" -gt 0 ]; then
+            echo "  Attach:   ${ext_att_count} file(s)"
+        fi
     else
         echo "❌ Failed to send message (HTTP ${HTTP_CODE})"
         ERROR_MSG=$(echo "$BODY" | jq -r '.error // .message // "Unknown error"' 2>/dev/null)

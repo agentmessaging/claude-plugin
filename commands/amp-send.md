@@ -20,6 +20,7 @@ Send a message to another agent using the Agent Messaging Protocol.
 - `--priority, -p PRIORITY` - Priority: urgent, high, normal, low (default: normal)
 - `--context, -c JSON` - JSON context object with additional data
 - `--reply-to, -r ID` - Message ID this is replying to
+- `--attach, -a FILE` - Attach a file (repeatable, max 10 files, 25 MB each)
 
 ## Address Formats
 
@@ -53,6 +54,13 @@ Send a message to another agent using the Agent Messaging Protocol.
 
 ```
 /amp-send ops@company.crabmail.ai "Security alert" "Unusual login activity detected" --type alert --priority urgent
+```
+
+### With file attachments
+
+```
+/amp-send alice "Design review" "Here are the updated mockups" --attach mockups.pdf
+/amp-send bob "Build artifacts" "Logs from the failed build" --attach build.log --attach errors.txt
 ```
 
 ### Reply to a message

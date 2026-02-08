@@ -146,6 +146,42 @@ echo ""
 echo "$body"
 echo ""
 
+# Show attachments if present
+attachments=$(echo "$MESSAGE" | jq '.payload.attachments // []')
+att_count=$(echo "$attachments" | jq 'length')
+
+if [ "$att_count" -gt 0 ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "ATTACHMENTS (${att_count})"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    echo "$attachments" | jq -r '.[] | @base64' | while read -r att_b64; do
+        att=$(echo "$att_b64" | base64 -d)
+        att_id=$(echo "$att" | jq -r '.id')
+        att_filename=$(echo "$att" | jq -r '.filename')
+        att_size=$(echo "$att" | jq -r '.size')
+        att_type=$(echo "$att" | jq -r '.content_type // "unknown"')
+        att_scan=$(echo "$att" | jq -r '.scan_status // "unknown"')
+
+        att_size_display=$(format_file_size "$att_size")
+
+        scan_icon="✅"
+        if [ "$att_scan" = "infected" ]; then
+            scan_icon="🔴"
+        elif [ "$att_scan" = "pending" ]; then
+            scan_icon="⏳"
+        elif [ "$att_scan" = "unknown" ]; then
+            scan_icon="❓"
+        fi
+
+        echo "  ${scan_icon} ${att_filename} (${att_size_display}, ${att_type})"
+        echo "     ID: ${att_id} | Scan: ${att_scan}"
+    done
+
+    echo ""
+fi
+
 # Show context if present
 if [ "$context" != "null" ] && [ "$context" != "{}" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -163,5 +199,8 @@ fi
 
 echo ""
 echo "Actions:"
-echo "  Reply:   amp-reply ${id} \"Your reply message\""
-echo "  Delete:  amp-delete ${id}"
+echo "  Reply:    amp-reply ${id} \"Your reply message\""
+echo "  Delete:   amp-delete ${id}"
+if [ "$att_count" -gt 0 ]; then
+    echo "  Download: amp-download ${id} --all"
+fi
