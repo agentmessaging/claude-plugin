@@ -67,15 +67,24 @@ _detect_openssl() {
 # Detect once and cache
 OPENSSL_BIN=$(_detect_openssl)
 
+OPENSSL_AVAILABLE=true
 if [ -z "$OPENSSL_BIN" ]; then
-    echo "Error: No Ed25519-capable OpenSSL found." >&2
-    echo "" >&2
-    echo "macOS ships with LibreSSL which lacks Ed25519 support." >&2
-    echo "Install OpenSSL 3 via Homebrew:" >&2
-    echo "  brew install openssl@3" >&2
-    echo "" >&2
-    exit 1
+    OPENSSL_AVAILABLE=false
+    # Don't exit here - operations not requiring signing (inbox, status) can still work
 fi
+
+# Require OpenSSL for operations that need signing/verification
+require_openssl() {
+    if [ "$OPENSSL_AVAILABLE" != "true" ]; then
+        echo "Error: No Ed25519-capable OpenSSL found." >&2
+        echo "" >&2
+        echo "macOS ships with LibreSSL which lacks Ed25519 support." >&2
+        echo "Install OpenSSL 3 via Homebrew:" >&2
+        echo "  brew install openssl@3" >&2
+        echo "" >&2
+        exit 1
+    fi
+}
 
 # Configuration
 #
@@ -565,6 +574,14 @@ load_config() {
         return 1
     fi
 
+    # Validate config has expected structure before loading (SEC-05)
+    local _has_agent
+    _has_agent=$(jq -r 'has("agent")' "${AMP_CONFIG}" 2>/dev/null)
+    if [ "$_has_agent" != "true" ]; then
+        echo "Warning: Config file missing 'agent' object, skipping auto-fix" >&2
+        return 1
+    fi
+
     # Export config values
     AMP_AGENT_NAME=$(jq -r '.agent.name // empty' "${AMP_CONFIG}" 2>/dev/null)
     AMP_TENANT=$(jq -r '.agent.tenant // "default"' "${AMP_CONFIG}" 2>/dev/null)
@@ -669,6 +686,7 @@ is_initialized() {
 
 # Generate Ed25519 keypair
 generate_keypair() {
+    require_openssl
     ensure_amp_dirs
 
     local private_key="${AMP_KEYS_DIR}/private.pem"
@@ -706,6 +724,7 @@ get_public_key_hex() {
 
 # Sign a message
 sign_message() {
+    require_openssl
     local message="$1"
     local private_key="${AMP_KEYS_DIR}/private.pem"
 
@@ -854,8 +873,10 @@ generate_message_id() {
     local timestamp
     if timestamp=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null); then
         : # got millisecond timestamp
+    elif timestamp=$(perl -e 'use Time::HiRes qw(time); printf "%d\n", time()*1000' 2>/dev/null); then
+        : # got millisecond timestamp via perl
     else
-        # Fallback: seconds with random suffix for uniqueness
+        # Fallback: seconds with random suffix for uniqueness (IMPL-05)
         timestamp="$(date +%s)000"
     fi
     local random
@@ -969,6 +990,13 @@ save_to_inbox() {
     local from=$(echo "$message_json" | jq -r '.envelope.from')
     local sender_dir=$(sanitize_address_for_path "$from")
 
+    # Replay protection (Section 07: Recipients MUST track message IDs)
+    local replay_db="${AMP_DIR}/replay_db"
+    if [ -f "$replay_db" ] && grep -qF "${id}" "$replay_db" 2>/dev/null; then
+        echo "Warning: Replay detected - message ${id} already received, skipping" >&2
+        return 1
+    fi
+
     # Create sender subdirectory
     local inbox_sender_dir="${AMP_INBOX_DIR}/${sender_dir}"
     mkdir -p "$inbox_sender_dir"
@@ -993,9 +1021,11 @@ save_to_inbox() {
            [ "$_save_from_provider" = "aimaestro.local" ]; then
             sig_valid="true"
         elif [ -n "$signature" ]; then
-            # External messages: default to unverified
-            # Actual verification requires the sender's public key which
-            # we may not have locally. Mark as false until verified.
+            # External messages: default to unverified (SEC-03)
+            # TODO: Attempt sender key lookup via provider API when available.
+            # Currently, external messages default to untrusted because we lack
+            # the sender's public key locally. A future version should query
+            # the sender's provider for their public key and verify the signature.
             sig_valid="false"
         fi
 
@@ -1010,6 +1040,17 @@ save_to_inbox() {
 
     local inbox_file="${inbox_sender_dir}/${id}.json"
     echo "$message_json" > "$inbox_file"
+
+    # Record message ID for replay protection
+    echo "${id}|$(date +%s)" >> "$replay_db"
+
+    # Prune replay_db entries older than 24 hours (best-effort)
+    if [ -f "$replay_db" ]; then
+        local _cutoff=$(( $(date +%s) - 86400 ))
+        local _tmp_db="${replay_db}.tmp.$$"
+        awk -F'|' -v c="$_cutoff" '$2+0 >= c' "$replay_db" > "$_tmp_db" 2>/dev/null && mv "$_tmp_db" "$replay_db" || rm -f "$_tmp_db"
+    fi
+
     echo "$inbox_file"
 }
 
@@ -1709,6 +1750,10 @@ download_attachment() {
     # Security: limit redirects and restrict protocols to prevent SSRF
     local dl_http
     if [ -n "$download_url" ]; then
+        # Warn about HTTP downloads (SEC-06: MITM risk on non-TLS connections)
+        if [[ "$download_url" == http://* ]]; then
+            echo "Warning: Downloading over HTTP (not HTTPS). Connection is not encrypted." >&2
+        fi
         local dl_response
         dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
             --max-filesize "$AMP_MAX_ATTACHMENT_SIZE" \
@@ -1766,6 +1811,9 @@ download_attachment() {
 # =============================================================================
 
 require_init() {
+    # TODO (IMPL-03): The auto-registration logic below duplicates code in
+    # amp-send.sh:458-548. These should be consolidated into a single
+    # auto_register() function in this file.
     if ! is_initialized; then
         # Auto-initialize: generate keys, save config, register
         local _agent_name=""

@@ -270,9 +270,13 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
 
             # Determine scan status: perform basic MIME verification locally
             # Full scanning (AV, injection) requires provider infrastructure
+            # Use spec-defined values: basic_clean (MIME checks passed), unscanned (no checks)
             local_scan_status="unscanned"
             if is_mime_blocked "$local_mime"; then
                 local_scan_status="rejected"
+            else
+                # MIME check passed - mark as basic_clean (required checks done, no AV)
+                local_scan_status="basic_clean"
             fi
 
             local_uploaded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

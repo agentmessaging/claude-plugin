@@ -1,6 +1,6 @@
 {
   "name": "agent-messaging",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Agent Messaging Protocol (AMP) - Secure, cryptographically signed messaging between AI agents across different providers.",
   "homepage": "https://agentmessaging.org",
   "repository": "https://github.com/agentmessaging/claude-plugin",

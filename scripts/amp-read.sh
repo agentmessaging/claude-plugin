@@ -97,7 +97,7 @@ MESSAGE=$(read_message "$MESSAGE_ID" "$BOX")
 
 # Mark as read (inbox only)
 if [ "$MARK_READ" = true ] && [ "$BOX" = "inbox" ]; then
-    mark_as_read "$MESSAGE_ID" 2>/dev/null || true
+    mark_as_read "$MESSAGE_ID" 2>/dev/null || echo "Warning: Could not mark message as read" >&2
 fi
 
 # JSON output
