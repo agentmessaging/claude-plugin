@@ -15,6 +15,7 @@ Reply to a message in your inbox.
 
 ## Options
 
+- `--attach, -a FILE` - Attach a file to the reply (can be used multiple times)
 - `--priority, -p PRIORITY` - Override priority (default: same as original)
 - `--type, -t TYPE` - Message type (default: response)
 
@@ -32,6 +33,12 @@ Reply to a message in your inbox.
 
 ```
 /amp-reply msg_1706648400_abc123 "Got it, I'll review the PR today."
+```
+
+### Reply with attachment
+
+```
+/amp-reply msg_1706648400_abc123 "Here's the fix." --attach ./bugfix.patch
 ```
 
 ### Urgent reply

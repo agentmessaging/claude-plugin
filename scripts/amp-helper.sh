@@ -717,8 +717,7 @@ sign_message() {
     # Use temporary files for signing (OpenSSL 3.x has issues with Ed25519 + stdin)
     local tmp_msg=$(mktemp)
     local tmp_sig=$(mktemp)
-    # Ensure temp files are cleaned up even if script exits unexpectedly
-    trap "rm -f '$tmp_msg' '$tmp_sig'" RETURN
+    trap 'rm -f "$tmp_msg" "$tmp_sig"' RETURN
 
     echo -n "${message}" > "$tmp_msg"
     # Note: Ed25519 keys require -rawin flag for raw message signing
@@ -736,19 +735,16 @@ verify_signature() {
     # Use temporary files for verification (Ed25519 requires -rawin flag)
     local tmp_msg=$(mktemp)
     local tmp_sig=$(mktemp)
-    # Ensure temp files are cleaned up even if script exits unexpectedly
-    trap "rm -f '$tmp_msg' '$tmp_sig'" RETURN
+    trap 'rm -f "$tmp_msg" "$tmp_sig"' RETURN
 
     echo -n "${message}" > "$tmp_msg"
     echo -n "${signature}" | base64 -d > "$tmp_sig"
 
     # Note: Ed25519 keys require -rawin flag for raw message verification
-    local result=1
     if $OPENSSL_BIN pkeyutl -verify -pubin -inkey "${public_key_file}" -rawin -in "$tmp_msg" -sigfile "$tmp_sig" 2>/dev/null; then
-        result=0
+        return 0
     fi
-
-    return $result
+    return 1
 }
 
 # =============================================================================
@@ -757,6 +753,9 @@ verify_signature() {
 
 # Parse AMP address: name@[scope.]tenant.provider
 # Sets: ADDR_NAME, ADDR_TENANT, ADDR_PROVIDER, ADDR_SCOPE, ADDR_IS_LOCAL
+#
+# WARNING: This function uses GLOBAL variables. Each call overwrites the previous
+# ADDR_* values. Callers MUST read results immediately before calling again.
 #
 # Matches the server's parseAMPAddress() logic:
 #   - Provider is always the last two domain parts (e.g. "aimaestro.local", "crabmail.ai")
@@ -898,10 +897,7 @@ create_message() {
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     # Default expiration: 7 days from now
     local expires_at
-    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || gdate -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || echo "")
+    expires_at=$(compute_expiry_date 7)
     # Thread ID: use explicit value if provided (from reply), otherwise use this message's ID
     local thread_id="${explicit_thread_id:-$id}"
 
@@ -1378,14 +1374,58 @@ sanitize_filename() {
     echo "$filename"
 }
 
-# Detect MIME type of a file
+# Detect MIME type of a file (magic bytes + extension fallback)
 detect_mime_type() {
     local filepath="$1"
+    local mime=""
+
+    # Try magic bytes detection first
     if command -v file &>/dev/null; then
-        file --mime-type -b "$filepath" 2>/dev/null || echo "application/octet-stream"
-    else
-        echo "application/octet-stream"
+        mime=$(file --mime-type -b "$filepath" 2>/dev/null || echo "")
     fi
+
+    # Extension-based fallback for known types (cross-platform consistency)
+    if [ -z "$mime" ] || [ "$mime" = "application/octet-stream" ]; then
+        local ext="${filepath##*.}"
+        ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+        case "$ext" in
+            pdf)  mime="application/pdf" ;;
+            json) mime="application/json" ;;
+            xml)  mime="application/xml" ;;
+            zip)  mime="application/zip" ;;
+            gz|gzip) mime="application/gzip" ;;
+            tar)  mime="application/x-tar" ;;
+            csv)  mime="text/csv" ;;
+            txt)  mime="text/plain" ;;
+            md)   mime="text/markdown" ;;
+            html|htm) mime="text/html" ;;
+            png)  mime="image/png" ;;
+            jpg|jpeg) mime="image/jpeg" ;;
+            gif)  mime="image/gif" ;;
+            svg)  mime="image/svg+xml" ;;
+            mp4)  mime="video/mp4" ;;
+            mp3)  mime="audio/mpeg" ;;
+            wav)  mime="audio/wav" ;;
+            docx) mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" ;;
+            xlsx) mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ;;
+            pptx) mime="application/vnd.openxmlformats-officedocument.presentationml.presentation" ;;
+            *)    mime="application/octet-stream" ;;
+        esac
+    fi
+
+    echo "$mime"
+}
+
+# Compute expiry date (default: 7 days from now)
+# Args: [days] (default: 7)
+# Returns: ISO 8601 timestamp or empty string on failure
+compute_expiry_date() {
+    local days="${1:-7}"
+    date -u -v+${days}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "+${days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || gdate -u -d "+${days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || python3 -c "from datetime import datetime,timedelta;print((datetime.utcnow()+timedelta(days=${days})).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null \
+        || echo ""
 }
 
 # Format file size for human-readable display
@@ -1481,6 +1521,7 @@ upload_attachment() {
 
     # Step 2: Upload the file content
     if [ -n "$upload_url" ]; then
+        echo "    Uploading $(format_file_size "$file_size")..." >&2
         local upload_response
         upload_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
             -X PUT "$upload_url" \
@@ -1507,13 +1548,21 @@ upload_attachment() {
     local confirm_result
     confirm_result=$(echo "$confirm_response" | sed '$d')
 
-    # Step 4: Poll for scan status (up to 30 seconds)
+    # Step 4: Poll for scan status with exponential backoff
+    # Default timeout: 60s (configurable via AMP_SCAN_TIMEOUT)
     local scan_status="pending"
     local download_url=""
     local poll_count=0
-    while [ "$scan_status" = "pending" ] && [ "$poll_count" -lt 6 ]; do
-        sleep 5
+    local poll_delay=2
+    local max_poll_time="${AMP_SCAN_TIMEOUT:-60}"
+    local total_wait=0
+    while [ "$scan_status" = "pending" ] && [ "$total_wait" -lt "$max_poll_time" ]; do
+        sleep "$poll_delay"
+        total_wait=$((total_wait + poll_delay))
         poll_count=$((poll_count + 1))
+        # Exponential backoff: 2, 4, 8, 10, 10, 10...
+        poll_delay=$((poll_delay * 2))
+        [ "$poll_delay" -gt 10 ] && poll_delay=10
 
         local status_response
         status_response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 10 \
@@ -1538,12 +1587,7 @@ upload_attachment() {
     local uploaded_at
     uploaded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local expires_at
-    # macOS uses -v+7d, GNU date uses -d "+7 days", gdate is GNU date on some systems
-    expires_at=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || date -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || gdate -u -d "+7 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || python3 -c "from datetime import datetime,timedelta;print((datetime.utcnow()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null \
-        || echo "")
+    expires_at=$(compute_expiry_date 7)
 
     jq -n \
         --arg id "$att_id" \
@@ -1603,9 +1647,14 @@ download_attachment() {
 
     local dest_path="${dest_dir}/${filename}"
 
-    # Handle filename collisions
+    # Handle filename collisions (max 100 to prevent DoS via repeated downloads)
     local counter=1
+    local max_collisions=100
     while [ -f "$dest_path" ]; do
+        if [ "$counter" -gt "$max_collisions" ]; then
+            echo "Error: Too many filename collisions for ${filename} (>${max_collisions})" >&2
+            return 1
+        fi
         local base="${filename%.*}"
         local ext="${filename##*.}"
         if [ "$base" = "$ext" ]; then
@@ -1657,17 +1706,22 @@ download_attachment() {
     fi
 
     # Download from URL or provider API
+    # Security: limit redirects and restrict protocols to prevent SSRF
     local dl_http
     if [ -n "$download_url" ]; then
         local dl_response
         dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
             --max-filesize "$AMP_MAX_ATTACHMENT_SIZE" \
+            --max-redirs 3 --proto '=https,http' \
+            -C - \
             -o "$dest_path" "$download_url" 2>&1)
         dl_http=$(echo "$dl_response" | tail -n1)
     elif [ -n "$api_url" ] && [ "$api_url" != "null" ] && [ -n "$api_key" ] && [ "$api_key" != "null" ]; then
         local dl_response
         dl_response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 120 \
             --max-filesize "$AMP_MAX_ATTACHMENT_SIZE" \
+            --max-redirs 3 \
+            -C - \
             -o "$dest_path" \
             -H "Authorization: Bearer ${api_key}" \
             "${api_url}/attachments/${att_id}/download" 2>&1)

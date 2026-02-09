@@ -60,7 +60,8 @@ detect_injection_patterns() {
     local flags="[]"
 
     # Convert content to lowercase for case-insensitive matching
-    local content_lower=$(echo "$content" | tr '[:upper:]' '[:lower:]')
+    # Use LC_ALL=C for consistent behavior across locales with UTF-8 content
+    local content_lower=$(echo "$content" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
     for pattern_def in "${INJECTION_PATTERNS[@]}"; do
         # Parse pattern definition
@@ -279,16 +280,15 @@ verify_message_signature() {
     local in_reply_to=$(echo "$message_json" | jq -r '.envelope.in_reply_to // ""')
 
     # Compute payload hash: Base64(SHA256(compact_payload)) — must match amp-send.sh signing format
-    local payload_hash=$(echo "$message_json" | jq -c '.payload' | tr -d '\n' | \
+    local payload_hash=$(echo "$message_json" | jq -cS '.payload' | tr -d '\n' | \
         ${OPENSSL_BIN:-openssl} dgst -sha256 -binary 2>/dev/null | base64 | tr -d '\n')
 
     # Build v1.1 canonical string
     local canonical="${from}|${to}|${subject}|${priority}|${in_reply_to}|${payload_hash}"
 
     # Verify using verify_signature helper from amp-helper.sh
-    local result
-    result=$(verify_signature "$canonical" "$signature" "$public_key_file" 2>/dev/null)
-    if [ "$result" = "true" ]; then
+    # Note: verify_signature returns exit code (0=valid, 1=invalid), not stdout
+    if verify_signature "$canonical" "$signature" "$public_key_file" 2>/dev/null; then
         echo "true"
     else
         echo "false"
