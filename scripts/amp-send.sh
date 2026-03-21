@@ -420,9 +420,11 @@ send_via_api() {
 # =============================================================================
 is_aimaestro_registration() {
     local provider_name="$1"
-    # Exact match on known AI Maestro provider names
+    # Match AI Maestro provider names: exact or tenant-prefixed (e.g., rnd23blocks.aimaestro.local)
     [ "$provider_name" = "aimaestro.local" ] || \
-    [ "$provider_name" = "${AMP_PROVIDER_DOMAIN}" ]
+    [ "$provider_name" = "${AMP_PROVIDER_DOMAIN}" ] || \
+    [[ "$provider_name" == *".aimaestro.local" ]] || \
+    [[ "$provider_name" == *".${AMP_PROVIDER_DOMAIN}" ]]
 }
 
 # =============================================================================

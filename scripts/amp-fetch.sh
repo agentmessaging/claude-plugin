@@ -121,7 +121,8 @@ for provider in "${PROVIDERS[@]}"; do
     # AI Maestro local providers use /messages/pending (API_URL already includes /api/v1)
     # External providers (e.g., Crabmail) use /v1/inbox
     FETCH_ENDPOINT="${API_URL}/v1/inbox"
-    if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
+    if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
+       [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
         FETCH_ENDPOINT="${API_URL}/messages/pending"
     fi
 
@@ -176,7 +177,8 @@ for provider in "${PROVIDERS[@]}"; do
             signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
             sig_valid="false"
 
-            if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
+            if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
+               [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
                 # AI Maestro verified signatures at route time — trust the relay
                 sig_valid="true"
             elif [ -n "$signature" ]; then
@@ -274,7 +276,8 @@ for provider in "${PROVIDERS[@]}"; do
             if [ "$MARK_AS_FETCHED" = true ]; then
                 # AI Maestro uses DELETE /messages/pending?id=X
                 # External providers use POST /v1/inbox/<id>/ack
-                if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ]; then
+                if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
+                   [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
                     curl -s --connect-timeout 3 -G -X DELETE "${API_URL}/messages/pending" \
                         --data-urlencode "id=${msg_id}" \
                         -H "Authorization: Bearer ${API_KEY}" \
