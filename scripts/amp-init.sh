@@ -270,6 +270,27 @@ if [ "$REGISTRATION_OK" = true ]; then
     IDENTITY_FILE=$(create_identity_file "$NAME" "$TENANT" "$ADDRESS" "$FINGERPRINT")
 fi
 
+# =============================================================================
+# Update .index.json for local agent discovery
+# =============================================================================
+# The index maps agent names to their directory names, enabling filesystem
+# delivery between co-located agents. Without this entry, other local agents
+# cannot discover this agent for direct message delivery.
+AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
+INDEX_FILE="${AGENTS_BASE_DIR}/.index.json"
+
+# Get the directory name (last component of AMP_DIR)
+AGENT_DIR_NAME=$(basename "$AMP_DIR")
+
+if [ -f "$INDEX_FILE" ]; then
+    # Add or update this agent's entry
+    jq --arg name "$NAME" --arg dir "$AGENT_DIR_NAME" '.[$name] = $dir' "$INDEX_FILE" > "${INDEX_FILE}.tmp" \
+        && mv "${INDEX_FILE}.tmp" "$INDEX_FILE"
+else
+    # Create new index file
+    jq -n --arg name "$NAME" --arg dir "$AGENT_DIR_NAME" '{($name): $dir}' > "$INDEX_FILE"
+fi
+
 echo ""
 echo "✅ AMP initialized successfully!"
 echo ""
