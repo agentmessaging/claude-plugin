@@ -443,18 +443,72 @@ if [ "$ROUTE" = "local" ]; then
 
     if [ -n "$LOCAL_PROVIDER_REG" ] && [ -f "$LOCAL_PROVIDER_REG" ]; then
         # ==========================================================================
-        # Local Provider Delivery (mesh routing)
+        # Local Provider Delivery
         # ==========================================================================
-        REGISTRATION=$(cat "$LOCAL_PROVIDER_REG")
-        API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
-        API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
-        ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
+        # Priority: filesystem delivery if recipient is on this machine,
+        # otherwise use the provider API for cross-host mesh routing.
 
         parse_address "$RECIPIENT"
         FULL_RECIPIENT=$(build_address "$ADDR_NAME" "$ADDR_TENANT" "$ADDR_PROVIDER")
 
-        SEND_URL="${ROUTE_URL:-${API_URL}/route}"
-        send_via_api "$SEND_URL" "$API_KEY" "$FULL_RECIPIENT" "AMP routing" || exit 1
+        # Check if recipient exists on this filesystem first
+        AGENTS_BASE_DIR="${HOME}/.agent-messaging/agents"
+        AMP_INDEX_FILE="${AGENTS_BASE_DIR}/.index.json"
+        RECIPIENT_UUID=""
+        if [ -f "$AMP_INDEX_FILE" ]; then
+            RECIPIENT_UUID=$(jq -r --arg name "$ADDR_NAME" '.[$name] // empty' "$AMP_INDEX_FILE" 2>/dev/null)
+        fi
+        if [ -n "$RECIPIENT_UUID" ]; then
+            RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${RECIPIENT_UUID}"
+        else
+            RECIPIENT_AMP_DIR="${AGENTS_BASE_DIR}/${ADDR_NAME}"
+        fi
+
+        if [ -d "${RECIPIENT_AMP_DIR}" ]; then
+            # Recipient IS on this machine — deliver directly via filesystem
+            save_to_sent "$MESSAGE_JSON" >/dev/null
+            MSG_ID=$(echo "$MESSAGE_JSON" | jq -r '.envelope.id')
+
+            RECIPIENT_INBOX="${RECIPIENT_AMP_DIR}/messages/inbox"
+            FROM_ADDR=$(echo "$MESSAGE_JSON" | jq -r '.envelope.from')
+            SENDER_DIR=$(sanitize_address_for_path "$FROM_ADDR")
+            mkdir -p "${RECIPIENT_INBOX}/${SENDER_DIR}"
+
+            # Strip local_path from attachments before delivery
+            DELIVERY_MSG=$(echo "$MESSAGE_JSON" | jq \
+                --arg received "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '.local = (.local // {}) + {received_at: $received, status: "unread"} |
+                 .payload.attachments = [(.payload.attachments // [])[] | del(.local_path)]')
+
+            # Apply content security (injection detection + wrapping) before writing
+            if type apply_content_security &>/dev/null; then
+                DELIVERY_MSG=$(apply_content_security "$DELIVERY_MSG" "${AMP_TENANT:-default}" "true")
+            fi
+
+            echo "$DELIVERY_MSG" > "${RECIPIENT_INBOX}/${SENDER_DIR}/${MSG_ID}.json"
+
+            echo "✅ Message sent (local filesystem delivery)"
+            echo ""
+            echo "  To:       ${FULL_RECIPIENT}"
+            echo "  Subject:  ${SUBJECT}"
+            echo "  Priority: ${PRIORITY}"
+            echo "  Type:     ${TYPE}"
+            echo "  ID:       ${MSG_ID}"
+
+            local_att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
+            if [ "$local_att_count" -gt 0 ]; then
+                echo "  Attach:   ${local_att_count} file(s)"
+            fi
+        else
+            # Recipient NOT on this machine — use provider API for cross-host routing
+            REGISTRATION=$(cat "$LOCAL_PROVIDER_REG")
+            API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
+            API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
+            ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
+
+            SEND_URL="${ROUTE_URL:-${API_URL}/route}"
+            send_via_api "$SEND_URL" "$API_KEY" "$FULL_RECIPIENT" "AMP routing" || exit 1
+        fi
 
     else
         # ==========================================================================
