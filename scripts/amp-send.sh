@@ -208,11 +208,11 @@ if [ ${#ATTACH_FILES[@]} -gt 0 ]; then
     UPLOAD_API_URL=""
     UPLOAD_API_KEY=""
 
-    # Try AI Maestro registration first
+    # Try local provider registration first (any .local domain)
     for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
         [ -f "$provider_file" ] || continue
         prov=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
-        if [ "$prov" = "aimaestro.local" ] || [ "$prov" = "${AMP_PROVIDER_DOMAIN}" ]; then
+        if [[ "$prov" == *.local ]]; then
             UPLOAD_API_URL=$(jq -r '.apiUrl // empty' "$provider_file" 2>/dev/null)
             UPLOAD_API_KEY=$(jq -r '.apiKey // empty' "$provider_file" 2>/dev/null)
             break
@@ -416,40 +416,36 @@ send_via_api() {
 }
 
 # =============================================================================
-# Helper: Check if a registration file is for the local AI Maestro provider
+# Helper: Check if a registration is for a local provider (any .local domain)
 # =============================================================================
-is_aimaestro_registration() {
+is_local_provider_registration() {
     local provider_name="$1"
-    # Match AI Maestro provider names: exact or tenant-prefixed (e.g., rnd23blocks.aimaestro.local)
-    [ "$provider_name" = "aimaestro.local" ] || \
-    [ "$provider_name" = "${AMP_PROVIDER_DOMAIN}" ] || \
-    [[ "$provider_name" == *".aimaestro.local" ]] || \
-    [[ "$provider_name" == *".${AMP_PROVIDER_DOMAIN}" ]]
+    [[ "$provider_name" == *.local ]]
 }
 
 # =============================================================================
 # Routing Decision
 # =============================================================================
-# For "local" routes, check if we're registered with AI Maestro provider.
+# For "local" routes, check if we're registered with a local provider.
 # If so, use the API for proper mesh routing; otherwise, fall back to filesystem.
 
 if [ "$ROUTE" = "local" ]; then
-    # Try to find AI Maestro registration
-    AI_MAESTRO_REG=""
+    # Try to find a local provider registration
+    LOCAL_PROVIDER_REG=""
     for provider_file in "${AMP_REGISTRATIONS_DIR}"/*.json; do
         [ -f "$provider_file" ] || continue
         provider=$(jq -r '.provider // empty' "$provider_file" 2>/dev/null)
-        if is_aimaestro_registration "$provider"; then
-            AI_MAESTRO_REG="$provider_file"
+        if is_local_provider_registration "$provider"; then
+            LOCAL_PROVIDER_REG="$provider_file"
             break
         fi
     done
 
-    if [ -n "$AI_MAESTRO_REG" ] && [ -f "$AI_MAESTRO_REG" ]; then
+    if [ -n "$LOCAL_PROVIDER_REG" ] && [ -f "$LOCAL_PROVIDER_REG" ]; then
         # ==========================================================================
-        # AI Maestro Provider Delivery (mesh routing)
+        # Local Provider Delivery (mesh routing)
         # ==========================================================================
-        REGISTRATION=$(cat "$AI_MAESTRO_REG")
+        REGISTRATION=$(cat "$LOCAL_PROVIDER_REG")
         API_URL=$(echo "$REGISTRATION" | jq -r '.apiUrl')
         API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
         ROUTE_URL=$(echo "$REGISTRATION" | jq -r '.routeUrl // empty')
@@ -462,7 +458,7 @@ if [ "$ROUTE" = "local" ]; then
 
     else
         # ==========================================================================
-        # No AI Maestro registration found — attempt auto-registration
+        # No local provider registration found — attempt auto-registration
         # ==========================================================================
         echo "  No AMP registration found. Auto-registering..."
 

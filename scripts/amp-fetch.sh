@@ -1,9 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# AMP Fetch - Fetch Messages from External Providers
+# AMP Fetch - Fetch Messages from Providers
 # =============================================================================
 #
-# Pull new messages from registered external providers.
+# Pull new messages from registered providers using the standard AMP API:
+#   GET  /messages/pending       — fetch pending messages
+#   DELETE /messages/pending/:id — acknowledge receipt
+#
+# All providers use the same endpoints. No provider-specific logic.
 #
 # Usage:
 #   amp-fetch                    # Fetch from all providers
@@ -25,7 +29,7 @@ MARK_AS_FETCHED=true
 show_help() {
     echo "Usage: amp-fetch [options]"
     echo ""
-    echo "Fetch new messages from external providers."
+    echo "Fetch new messages from registered providers."
     echo ""
     echo "Options:"
     echo "  --provider, -p PROVIDER   Fetch from specific provider only"
@@ -93,7 +97,7 @@ else
 fi
 
 if [ ${#PROVIDERS[@]} -eq 0 ]; then
-    echo "No external providers registered."
+    echo "No providers registered."
     echo ""
     echo "Register with a provider first:"
     echo "  amp-register --provider crabmail.ai --tenant <your-tenant>"
@@ -111,19 +115,18 @@ for provider in "${PROVIDERS[@]}"; do
     API_KEY=$(echo "$REGISTRATION" | jq -r '.apiKey')
     EXTERNAL_ADDRESS=$(echo "$REGISTRATION" | jq -r '.address')
 
+    # Use explicit fetchUrl from registration if available, otherwise derive from apiUrl
+    # All providers use the same AMP standard: GET /messages/pending
+    FETCH_ENDPOINT=$(echo "$REGISTRATION" | jq -r '.fetchUrl // empty')
+    if [ -z "$FETCH_ENDPOINT" ]; then
+        FETCH_ENDPOINT="${API_URL}/messages/pending"
+    fi
+
     if [ "$VERBOSE" = true ]; then
         echo "Fetching from ${provider}..."
         echo "  API: ${API_URL}"
+        echo "  Fetch: ${FETCH_ENDPOINT}"
         echo "  Address: ${EXTERNAL_ADDRESS}"
-    fi
-
-    # Determine fetch endpoint based on provider type
-    # AI Maestro local providers use /messages/pending (API_URL already includes /api/v1)
-    # External providers (e.g., Crabmail) use /v1/inbox
-    FETCH_ENDPOINT="${API_URL}/v1/inbox"
-    if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
-       [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
-        FETCH_ENDPOINT="${API_URL}/messages/pending"
     fi
 
     # Fetch messages from provider
@@ -172,19 +175,31 @@ for provider in "${PROVIDERS[@]}"; do
             fi
 
             # Signature verification for fetched messages
-            # - AI Maestro providers: server already verified on ingest, trust it
-            # - External providers: verify if we have the sender's public key
+            # If the message has a valid signature, verify it locally when possible.
+            # Messages from the same provider are trusted (provider verified at route time).
             signature=$(echo "$msg" | jq -r '.envelope.signature // empty')
             sig_valid="false"
 
-            if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
-               [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
-                # AI Maestro verified signatures at route time — trust the relay
+            # Check if message was relayed through the same provider we registered with
+            # (provider already verified the signature at route/ingest time)
+            msg_from=$(echo "$msg" | jq -r '.envelope.from // empty')
+            msg_from_provider=""
+            if [[ "$msg_from" == *"@"* ]]; then
+                # Extract provider from address: name@tenant.provider → provider part
+                msg_from_after_at="${msg_from#*@}"
+                # If it has a dot, the provider is everything after the first dot
+                if [[ "$msg_from_after_at" == *.* ]]; then
+                    msg_from_provider="${msg_from_after_at#*.}"
+                fi
+            fi
+
+            # Trust messages relayed through our registered provider
+            if [ "$msg_from_provider" = "$provider" ] || \
+               [[ "$provider" == *".$msg_from_provider" ]] || \
+               [[ "$msg_from_provider" == *".$provider" ]]; then
                 sig_valid="true"
             elif [ -n "$signature" ]; then
-                # External provider: attempt local verification if sender's public
-                # key is cached (e.g. from a previous registration exchange).
-                # Without the sender's key, we mark it as unverified but still accept.
+                # Different provider or unknown: attempt local verification
                 sender_addr=$(echo "$msg" | jq -r '.envelope.from // empty')
                 sender_name="${sender_addr%%@*}"
                 # Look up sender UUID from .index.json for key resolution
@@ -272,22 +287,12 @@ for provider in "${PROVIDERS[@]}"; do
 
             TOTAL_NEW=$((TOTAL_NEW + 1))
 
-            # Mark as fetched on provider (if enabled)
+            # Acknowledge receipt on provider (AMP standard: DELETE /messages/pending/:id)
             if [ "$MARK_AS_FETCHED" = true ]; then
-                # AI Maestro uses DELETE /messages/pending?id=X
-                # External providers use POST /v1/inbox/<id>/ack
-                if [ "$provider" = "aimaestro.local" ] || [ "$provider" = "${AMP_PROVIDER_DOMAIN}" ] || \
-                   [[ "$provider" == *".aimaestro.local" ]] || [[ "$provider" == *".${AMP_PROVIDER_DOMAIN}" ]]; then
-                    curl -s --connect-timeout 3 -G -X DELETE "${API_URL}/messages/pending" \
-                        --data-urlencode "id=${msg_id}" \
-                        -H "Authorization: Bearer ${API_KEY}" \
-                        >/dev/null 2>&1 || true
-                else
-                    # msg_id is validated to [a-zA-Z0-9_-] so safe in path segment
-                    curl -s --connect-timeout 3 -X POST "${API_URL}/v1/inbox/${msg_id}/ack" \
-                        -H "Authorization: Bearer ${API_KEY}" \
-                        >/dev/null 2>&1 || true
-                fi
+                # msg_id is validated to [a-zA-Z0-9_-] so safe in path segment
+                curl -s --connect-timeout 3 -X DELETE "${API_URL}/messages/pending/${msg_id}" \
+                    -H "Authorization: Bearer ${API_KEY}" \
+                    >/dev/null 2>&1 || true
             fi
         done < <(echo "$BODY" | jq -c '.messages[]' 2>/dev/null)
 
