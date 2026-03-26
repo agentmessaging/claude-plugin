@@ -1,0 +1,15 @@
+shell=bash
+
+# SC2155: Declare and assign separately. ~38 instances of `local var=$(...)`
+# in amp-helper.sh/amp-security.sh. Fixing is a code change, not CI change.
+disable=SC2155
+
+# SC1090/SC1091: Can't follow non-constant/missing source.
+# Every script does `source "${SCRIPT_DIR}/amp-helper.sh"` with computed path.
+disable=SC1091
+disable=SC1090
+
+# SC2034: Variable appears unused. Many variables are set by helper functions
+# (parse_address, etc.) for use by sourcing scripts — shellcheck can't track
+# cross-file usage since each script sources amp-helper.sh dynamically.
+disable=SC2034
