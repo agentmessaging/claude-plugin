@@ -45,9 +45,12 @@ setup() {
     run bash "${SCRIPTS_DIR}/amp-register.sh" --provider crabmail.ai --user-key "uk_testkey123"
     assert_success
 
-    # Check permissions (should be 600 - owner read/write only)
+    # Check permissions (should be 600 - owner read/write only).
+    # GNU stat (-c) first, BSD/macOS stat (-f) as fallback: on Linux `stat -f`
+    # does NOT fail (it prints filesystem status and exits 0), so a BSD-first
+    # order never reaches the GNU fallback and the assert compares garbage.
     local perms
-    perms=$(stat -f '%Lp' "${AMP_DIR}/registrations/crabmail.ai.json" 2>/dev/null || stat -c '%a' "${AMP_DIR}/registrations/crabmail.ai.json" 2>/dev/null)
+    perms=$(stat -c '%a' "${AMP_DIR}/registrations/crabmail.ai.json" 2>/dev/null || stat -f '%Lp' "${AMP_DIR}/registrations/crabmail.ai.json" 2>/dev/null)
     assert_equal "$perms" "600"
 }
 
