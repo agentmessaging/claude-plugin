@@ -202,6 +202,21 @@ if [ -n "$AGENT_UUID" ]; then
     fi
 fi
 
+# Report this session's cumulative cost to AI Maestro so the agent's "API Cost"
+# metric reflects real usage. Best-effort, backgrounded, never blocks the render.
+# Only PATCH when the cost has GROWN (monotonic): avoids spamming the API every
+# render and avoids the value dipping to ~0 when a new session starts. (Lifetime
+# accumulation across sessions is a later OTLP concern.)
+if [ -n "$AGENT_UUID" ] && [ -n "$COST" ]; then
+    _cost_cache="${AGENTS_BASE}/${AGENT_UUID}/.last-cost"
+    _last_cost=$(cat "$_cost_cache" 2>/dev/null || echo 0)
+    if awk -v c="$COST" -v l="$_last_cost" 'BEGIN{exit !(c+0 > l+0)}' 2>/dev/null; then
+        echo "$COST" > "$_cost_cache" 2>/dev/null
+        curl -s -m 2 -X PATCH "${AMP_MAESTRO_URL:-http://localhost:23000}/api/agents/${AGENT_UUID}/metrics" \
+            -H 'Content-Type: application/json' -d "{\"estimatedCost\": ${COST}}" >/dev/null 2>&1 &
+    fi
+fi
+
 # --- Build status line ---
 if [ -n "$AGENT_ADDRESS" ]; then
     AMP_PART="$AGENT_ADDRESS"
