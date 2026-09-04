@@ -100,6 +100,53 @@ git clone https://github.com/agentmessaging/claude-plugin.git ~/agent-messaging
 export PATH="$HOME/agent-messaging/scripts:$PATH"
 ```
 
+### Required setup for Claude Code: command permissions
+
+**Without this, an agent cannot process its own inbox unattended.**
+
+Claude Code asks for approval every time a Bash command runs unless it is
+allow-listed. That makes AMP unusable for background work: the inbox poll
+injects "check your inbox", the agent tries to run `amp-inbox.sh`, and the run
+stops at an approval dialog nobody is watching. The message stays unread and
+nothing reports a problem.
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(amp-inbox.sh:*)",
+      "Bash(amp-read.sh:*)",
+      "Bash(amp-reply.sh:*)",
+      "Bash(amp-send.sh:*)",
+      "Bash(amp-download.sh:*)",
+      "Bash(amp-status.sh:*)",
+      "Bash(amp-fetch.sh:*)",
+      "Bash(amp-identity.sh:*)",
+      "Bash(CLAUDE_AGENT_NAME=* amp-inbox.sh:*)",
+      "Bash(CLAUDE_AGENT_NAME=* amp-read.sh:*)",
+      "Bash(CLAUDE_AGENT_NAME=* amp-reply.sh:*)",
+      "Bash(CLAUDE_AGENT_NAME=* amp-send.sh:*)"
+    ]
+  }
+}
+```
+
+Merge these into an existing `permissions.allow` array rather than replacing it,
+and note this is **per machine**.
+
+**Deliberately not on this list:**
+
+| command | why it should still prompt |
+|---|---|
+| `amp-init.sh`, `amp-register.sh` | they change the agent's identity |
+| `amp-delete.sh` | deleting mail is irreversible |
+
+The three invocation forms (bare, `CLAUDE_AGENT_NAME=`, `AMP_DIR=`) exist because
+agents are launched in different ways; allow the ones your launcher actually
+uses.
+
 ## Address Formats
 
 **Local addresses** (work within your AI Maestro mesh):
