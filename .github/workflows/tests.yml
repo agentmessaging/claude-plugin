@@ -1,29 +1,21 @@
 name: CI
 on:
+  # No `paths:` filter, deliberately.
+  #
+  # ShellCheck and Tests are REQUIRED status checks on main. A path filter means
+  # they never run for a change outside the filter — and a check that is required
+  # but never reported blocks the pull request forever, not temporarily. A
+  # docs-only PR touching skills/ sat unmergeable in exactly that state, showing
+  # "0 checks" and BLOCKED, with nothing to wait for and nothing to re-run.
+  #
+  # The filter was saving about a minute of CI. It cost a permanently stuck PR
+  # and an afternoon working out why. Required checks and path filters should not
+  # be combined; if the cost ever matters, make the jobs exit early instead, so
+  # they still report.
   pull_request:
     branches: [main]
-    paths:
-      - 'scripts/**'
-      - 'tests/**'
-      - 'run_tests.sh'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/tests.yml'
-      - '.shellcheckrc'
   push:
     branches: [main]
-    paths:
-      - 'scripts/**'
-      - 'tests/**'
-      - 'run_tests.sh'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/tests.yml'
-      - '.shellcheckrc'
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   lint:
