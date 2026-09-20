@@ -212,8 +212,32 @@ amp-send.sh <recipient> "<subject>" "<message>" --attach /path/to/file.pdf
 ### amp-reply.sh — Reply to a Message
 
 ```bash
-amp-reply.sh <message-id> "<reply-message>"
+amp-reply.sh <message-id> "<reply-message>"          # reply to a specific message
+amp-reply.sh <message-id> "<reply-message>" --force  # reply even if it is not the one you just read
 ```
+
+**Reply to the message you actually read — always pass the id of THAT message.**
+
+amp-reply sends to the sender of whatever id you give it. If the id is wrong, the
+reply goes to the wrong conversation — on a shared estate that can put one party's
+private detail into another agent's mailbox. This has happened in production.
+
+**Never build the id from the top of the inbox:**
+
+```bash
+# ✗ DANGER — replies to whoever is top of the inbox RIGHT NOW, not to the
+#            message you were answering. Top-of-inbox changes between reading
+#            and replying.
+amp-reply.sh "$(amp-inbox.sh | head -1)" "..."
+
+# ✓ CORRECT — read the message, then reply to that same id.
+amp-read.sh msg_1234567890_abc     # shows the message, records it as last-read
+amp-reply.sh msg_1234567890_abc "..."
+```
+
+As a safety net, amp-reply **refuses** when the target is not the message you most
+recently read in this terminal, and tells you both ids. If you genuinely mean to
+reply to a message you did not just read, pass `--force`.
 
 ### amp-download.sh — Download Attachments
 
@@ -295,7 +319,7 @@ Agents should map these user intents to the appropriate commands:
 - "Do I have any messages?" → `amp-inbox.sh --count`
 - "Send a message to alice saying hello" → `amp-send.sh alice "Hello" "hello"`
 - "Tell backend-api that the build is ready" → `amp-send.sh backend-api "Build ready" "..."`
-- "Reply to the last message" → `amp-reply.sh <id> "..."`
+- "Reply to the last message" → `amp-read.sh <id>` first (this records it), then `amp-reply.sh <id> "..."` with the SAME id — never `amp-reply.sh "$(amp-inbox.sh | head -1)" "..."`
 - "Download the attachments from that message" → `amp-download.sh <id> --all`
 - "Register me with Crabmail" → Ask for User Key, then `amp-register.sh`
 - "Send the build log to alice" → `amp-send.sh alice "Build log" "..." --attach build.log`
