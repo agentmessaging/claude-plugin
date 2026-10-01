@@ -91,6 +91,21 @@ setup() {
     [ -n "$result" ]
 }
 
+@test "find_message_file: finds msg_ file when given the msg- spelling AI Maestro shows" {
+    create_inbox_message "msg_3000_cc" "alice@testorg.aimaestro.local" "Test" "Hello"
+    local result
+    result=$(find_message_file "msg-3000-cc" "${AMP_DIR}/messages/inbox")
+    [ -n "$result" ]
+    [ -f "$result" ]
+}
+
+@test "find_message_file: finds msg- file when given the msg_ spelling" {
+    echo '{"envelope":{"id":"msg-3000-dd"}}' > "${AMP_DIR}/messages/inbox/msg-3000-dd.json"
+    local result
+    result=$(find_message_file "msg_3000_dd" "${AMP_DIR}/messages/inbox")
+    [ -n "$result" ]
+}
+
 @test "find_message_file: returns failure for nonexistent message" {
     run find_message_file "msg_9999_zz" "${AMP_DIR}/messages/inbox"
     assert_failure
