@@ -235,3 +235,12 @@ settings() { echo "${HOME}/.claude/settings.json"; }
     [ "$(jq -r .statusLine.command "$(settings)")" = "/usr/local/bin/other-line.sh" ]
     [ "$(jq -r '.statusLine.refreshInterval // "none"' "$(settings)")" = "none" ]
 }
+
+@test "row 2: a long idle uses hours and days, like the dashboard header" {
+    t=$(transcript_aged $(( 125 * 60 )))
+    run run_status "{\"transcript_path\":\"$t\"}"
+    assert_line --index 1 --partial "| last turn 2h ago"
+    t=$(transcript_aged $(( 3 * 24 * 3600 + 600 )))
+    run run_status "{\"transcript_path\":\"$t\"}"
+    assert_line --index 1 --partial "| last turn 3d ago"
+}

@@ -367,7 +367,12 @@ if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
     MTIME=$(stat -c %Y "$TRANSCRIPT" 2>/dev/null || stat -f %m "$TRANSCRIPT" 2>/dev/null)
     case "$MTIME" in ''|*[!0-9]*) MTIME="" ;; esac
     if [ -n "$MTIME" ] && [ $(( NOW_S - MTIME )) -gt 120 ]; then
-        ROW2="$ROW2 | last turn $(( (NOW_S - MTIME) / 60 ))m ago"
+        # Same units as the dashboard header: 12m, 3h, 2d.
+        IDLE_M=$(( (NOW_S - MTIME) / 60 ))
+        if [ "$IDLE_M" -ge 1440 ]; then IDLE_TXT="$(( IDLE_M / 1440 ))d"
+        elif [ "$IDLE_M" -ge 60 ]; then IDLE_TXT="$(( IDLE_M / 60 ))h"
+        else IDLE_TXT="${IDLE_M}m"; fi
+        ROW2="$ROW2 | last turn ${IDLE_TXT} ago"
     fi
 fi
 
