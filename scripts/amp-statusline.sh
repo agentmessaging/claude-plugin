@@ -362,7 +362,9 @@ fi
 # Last turn: the transcript was last written this long ago. Shown after 2 minutes
 # of quiet; the idle refresh (refreshInterval) keeps it current.
 if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-    MTIME=$(stat -f %m "$TRANSCRIPT" 2>/dev/null || stat -c %Y "$TRANSCRIPT" 2>/dev/null)
+    # GNU stat first: on Linux `stat -f` means "filesystem status" and prints a
+    # block of text (and succeeds in part), so the BSD form must come second.
+    MTIME=$(stat -c %Y "$TRANSCRIPT" 2>/dev/null || stat -f %m "$TRANSCRIPT" 2>/dev/null)
     case "$MTIME" in ''|*[!0-9]*) MTIME="" ;; esac
     if [ -n "$MTIME" ] && [ $(( NOW_S - MTIME )) -gt 120 ]; then
         ROW2="$ROW2 | last turn $(( (NOW_S - MTIME) / 60 ))m ago"
