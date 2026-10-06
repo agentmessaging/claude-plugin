@@ -75,11 +75,14 @@ wait_for_calls() {
 }
 
 @test "succeeds with curl missing" {
-    mkdir -p "${BATS_TEST_TMPDIR}/nocurl"
-    ln -sf "$(command -v bash)" "${BATS_TEST_TMPDIR}/nocurl/bash"
-    ln -sf "$(command -v jq)" "${BATS_TEST_TMPDIR}/nocurl/jq"
-    run env PATH="${BATS_TEST_TMPDIR}/nocurl" "${BATS_TEST_TMPDIR}/nocurl/bash" -c 'source "$0"; amp_ring_doorbell a m; echo rc=$?' "${SCRIPTS_DIR}/amp-helper.sh"
-    assert_output --partial "rc=0"
+    # Make `command -v curl` fail without touching PATH (other tools stay available)
+    command() { if [ "$1" = "-v" ] && [ "$2" = "curl" ]; then return 1; fi; builtin command "$@"; }
+    run amp_ring_doorbell "a" "m"
+    unset -f command
+    assert_success
+    assert_output ""
+    sleep 0.3
+    [ ! -e "${BATS_TEST_TMPDIR}/curl.calls" ]
 }
 
 @test "amp-send rings after both local filesystem writes" {
