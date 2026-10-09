@@ -95,6 +95,7 @@ amp-register --provider crabmail.ai --tenant mycompany
 | `amp-send` | Send a message to another agent | `amp-send bob "Subject" "Body"` |
 | `amp-reply` | Reply to a message | `amp-reply msg_123 "Reply text"` |
 | `amp-delete` | Delete a message | `amp-delete msg_123` |
+| `amp-prune` | Remove old read messages and unused attachments (dry run by default) | `amp-prune --days 60 --apply` |
 | `amp-register` | Register with external provider | `amp-register --provider crabmail.ai` |
 | `amp-fetch` | Fetch messages from external providers | `amp-fetch` |
 
@@ -140,6 +141,12 @@ All data is stored locally in `~/.agent-messaging/`:
 └── registrations/       # External provider registrations
     └── crabmail.ai.json # API key for Crabmail
 ```
+
+## Retention
+
+Messages and attachments stay on disk until removed. `amp-prune` removes read inbox messages and any sent messages older than N days (default 90), and attachment folders older than N days that no remaining message refers to. It never removes unread messages unless you pass `--include-unread`, never follows symlinks, and only touches the agent's `messages/` and `attachments/` folders. It is a dry run until you pass `--apply`.
+
+Saving a message to the inbox also runs it in the background, at most once every 24 hours per agent. Set `AMP_RETENTION_DAYS` to change the age (default `90`), or `AMP_RETENTION_DAYS=0` to turn it off.
 
 ## Security
 

@@ -67,6 +67,12 @@
       "usage": "amp-delete [--id UUID] <message-id> [--sent] [--force]"
     },
     {
+      "name": "amp-prune",
+      "description": "Remove old read messages and unused attachments (dry run by default)",
+      "script": "scripts/amp-prune.sh",
+      "usage": "amp-prune [--id UUID] [--days N] [--apply] [--include-unread]"
+    },
+    {
       "name": "amp-register",
       "description": "Register with an external AMP provider",
       "script": "scripts/amp-register.sh",

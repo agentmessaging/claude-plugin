@@ -28,6 +28,7 @@
     "commands/amp-read.md",
     "commands/amp-reply.md",
     "commands/amp-delete.md",
+    "commands/amp-prune.md",
     "commands/amp-register.md",
     "commands/amp-fetch.md",
     "commands/amp-download.md"
