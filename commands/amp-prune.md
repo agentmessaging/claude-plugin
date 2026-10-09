@@ -26,7 +26,7 @@ Symlinks are never followed. A summary with the bytes freed is printed.
 
 ## Automatic pruning
 
-Saving a message to the inbox runs this in the background, at most once every 24 hours. Set `AMP_RETENTION_DAYS` to change the age, or `0` to turn it off.
+Off by default. Set `AMP_RETENTION_DAYS=N` and saving a message to the inbox runs this in the background, at most once every 24 hours. Unset, `0` or a non-number leaves it off.
 
 ## Examples
 

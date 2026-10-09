@@ -118,7 +118,25 @@ save_msg() {
         '{"envelope":{"id":"msg_new_1","from":"carol@acme.aimaestro.local","to":"me@acme.aimaestro.local"},"payload":{}}'
 }
 
-@test "save_to_inbox prunes in the background and writes a stamp" {
+@test "save_to_inbox does NOT prune by default (opt-in only)" {
+    unset AMP_RETENTION_DAYS
+    run save_msg
+    assert_success
+    sleep 1
+    [ -f "$IN/m_read_old.json" ]
+    [ ! -e "${AMP_DIR}/.last-prune" ]
+}
+
+@test "save_to_inbox ignores a non-numeric AMP_RETENTION_DAYS" {
+    export AMP_RETENTION_DAYS=soon
+    run save_msg
+    assert_success
+    sleep 1
+    [ -f "$IN/m_read_old.json" ]
+}
+
+@test "save_to_inbox prunes in the background and writes a stamp when opted in" {
+    export AMP_RETENTION_DAYS=90
     run save_msg
     assert_success
     wait_gone "$IN/m_read_old.json"
@@ -127,6 +145,7 @@ save_msg() {
 }
 
 @test "save_to_inbox does not prune again within 24 hours" {
+    export AMP_RETENTION_DAYS=90
     touch "${AMP_DIR}/.last-prune"
     run save_msg
     assert_success
@@ -144,6 +163,7 @@ save_msg() {
 }
 
 @test "a stale stamp lets the prune run again" {
+    export AMP_RETENTION_DAYS=90
     touch -t "$OLD" "${AMP_DIR}/.last-prune"
     run save_msg
     assert_success

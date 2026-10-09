@@ -1202,11 +1202,13 @@ sanitize_address_for_path() {
 }
 
 # Opportunistic retention: at most once per 24 hours per agent, prune old read
-# messages and unreferenced attachments in the background. AMP_RETENTION_DAYS
-# sets the age (default 90); 0 turns it off. Silent, and never fails the caller.
+# messages and unreferenced attachments in the background, but ONLY when the owner has
+# set AMP_RETENTION_DAYS to a number of days. It is off by default: messages are the
+# agents' conversation record, and on a real fleet (236 agents, 407 MB) the default 90 days
+# would have deleted 8,061 messages to free 18 MB. Silent, and never fails the caller.
 maybe_prune_old_messages() {
-    local days="${AMP_RETENTION_DAYS:-90}"
-    [[ "$days" =~ ^[0-9]+$ ]] || days=90
+    local days="${AMP_RETENTION_DAYS:-0}"
+    [[ "$days" =~ ^[0-9]+$ ]] || return 0
     [ "$days" -ge 1 ] || return 0
     [ -d "$AMP_DIR" ] || return 0
     local stamp="${AMP_DIR}/.last-prune"

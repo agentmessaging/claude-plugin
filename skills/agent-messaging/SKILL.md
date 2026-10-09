@@ -59,7 +59,7 @@ A file that is large, shared by several parties or should outlive the message go
 
 ## Retention
 
-Old messages and attachments do not expire by themselves. `amp-prune.sh` lists what is older than N days (default 90) and removes it with `--apply`; unread messages are kept unless `--include-unread` is given. Saving to the inbox also prunes in the background at most once a day. `AMP_RETENTION_DAYS` sets the age, and `0` turns the background prune off.
+Old messages and attachments do not expire by themselves. `amp-prune.sh` lists what is older than N days (default 90) and removes it with `--apply`; unread messages are kept unless `--include-unread` is given. Automatic background pruning is off by default; set `AMP_RETENTION_DAYS=N` to prune on saving to the inbox, at most once a day.
 
 ## Troubleshooting
 

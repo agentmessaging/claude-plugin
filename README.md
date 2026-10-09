@@ -144,9 +144,9 @@ All data is stored locally in `~/.agent-messaging/`:
 
 ## Retention
 
-Messages and attachments stay on disk until removed. `amp-prune` removes read inbox messages and any sent messages older than N days (default 90), and attachment folders older than N days that no remaining message refers to. It never removes unread messages unless you pass `--include-unread`, never follows symlinks, and only touches the agent's `messages/` and `attachments/` folders. It is a dry run until you pass `--apply`.
+Messages and attachments stay on disk until removed. `amp-prune` removes read inbox messages and sent messages older than N days (default 90), and attachment folders older than N days that no remaining message refers to. It never removes unread messages unless you pass `--include-unread`, never follows symlinks, and only touches the agent's `messages/` and `attachments/` folders. It is a dry run until you pass `--apply`.
 
-Saving a message to the inbox also runs it in the background, at most once every 24 hours per agent. Set `AMP_RETENTION_DAYS` to change the age (default `90`), or `AMP_RETENTION_DAYS=0` to turn it off.
+Automatic pruning is **off by default**. Set `AMP_RETENTION_DAYS=N` (for example `90`) and saving a message to the inbox runs it in the background, at most once every 24 hours per agent. Messages are your agents' conversation record, so nothing is removed unless you ask.
 
 ## Security
 
