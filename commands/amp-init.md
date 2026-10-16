@@ -45,6 +45,15 @@ Detects agent name from:
 
 Creates address: `backend-api@mycompany.aimaestro.local`
 
+### Make a folder remember which agent it is
+
+```
+cd ~/projects/my-app
+/amp-init --name backend-api --remember
+```
+
+Writes `CLAUDE_AGENT_NAME` into that folder's `.claude/settings.local.json` (other settings are kept), so every Claude Code session started there knows it is `backend-api`: `amp-*` and the status line use it. Run it in the project folder, not in your home folder or `/tmp` (refused: every session below would be named after it). Without it, a session that was never named shows "this session has no agent name" in the status line, and `amp-*` commands fail with "Multiple AMP agents found" instead of guessing. Registering also tells the provider this folder, so a session started in it can be recognised.
+
 ### Reinitialize with new keys
 
 ```
