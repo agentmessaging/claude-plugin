@@ -1,6 +1,6 @@
 {
   "name": "amp-claude-plugin",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Agent Messaging Protocol - Claude Code Plugin",
   "scripts": {
