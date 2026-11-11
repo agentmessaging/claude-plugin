@@ -244,3 +244,26 @@ settings() { echo "${HOME}/.claude/settings.json"; }
     run run_status "{\"transcript_path\":\"$t\"}"
     assert_line --index 1 --partial "| last turn 3d ago"
 }
+
+@test "row 2: plan usage limits after the cost, yellow from 80%" {
+    now=$(date +%s)
+    run run_status "{\"rate_limits\":{\"five_hour\":{\"used_percentage\":42.7,\"resets_at\":$((now + 3600))},\"seven_day\":{\"used_percentage\":18,\"resets_at\":$((now + 86400))}}}"
+    assert_line --index 1 --partial "| \$65.78 | 5h 42% · wk 18%"
+    run run_status "{\"rate_limits\":{\"five_hour\":{\"used_percentage\":91,\"resets_at\":$((now + 3600))}}}"
+    assert_line --index 1 --partial "| $(printf '\033[33m')5h 91%$(printf '\033[0m')"
+}
+
+@test "row 2: no rate_limits block means no limits part" {
+    run run_status '{}'
+    refute_line --index 1 --partial "5h "
+}
+
+@test "report: the usage limits travel in the POST" {
+    now=$(date +%s)
+    run run_status "{\"rate_limits\":{\"five_hour\":{\"used_percentage\":42.7,\"resets_at\":$((now + 3600))}}}"
+    wait_for_post
+    body=$(head -1 "${CURL_LOG_DIR}/snapshot.bodies")
+    [ "$(echo "$body" | jq -r .limits.fiveHour.percent)" = "42" ]
+    [ "$(echo "$body" | jq -r .limits.fiveHour.resetsAt)" = "$((now + 3600))" ]
+    [ "$(echo "$body" | jq -r '.limits.week // "none"')" = "none" ]
+}

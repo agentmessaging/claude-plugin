@@ -160,3 +160,29 @@ status_line() {
     run /usr/bin/grep -c "working_directory" "${BATS_TEST_TMPDIR}/curl_calls.log"
     assert_output "0"
 }
+
+# ---- the account (AI Maestro's Model access setting) -------------------------
+# Each test keeps the cached agent list in its own temp folder, never the user's real one.
+
+@test "status line: row 1 names the account the agent is set to use" {
+    export AMP_AGENT_ID="aaaaaaaa-0000-0000-0000-000000000001" TMPDIR="$BATS_TEST_TMPDIR"
+    maestro_agents "{\"agents\":[{\"id\":\"aaaaaaaa-0000-0000-0000-000000000001\",\"name\":\"alpha\",\"workingDirectory\":\"${HOME}/work/project\",\"credential\":{\"kind\":\"oauth-token\",\"secret\":\"ACME_MAX\",\"account\":\"Acme Max plan\"},\"credentialCheck\":{\"state\":\"match\"}}]}"
+    status_line "${HOME}/work/project" >/dev/null; sleep 1   # the first render fills the cache in the background
+    run status_line "${HOME}/work/project"
+    assert_line --index 0 --partial "| acct Acme Max plan"
+}
+
+@test "status line: a session on another account is red on row 1" {
+    export AMP_AGENT_ID="aaaaaaaa-0000-0000-0000-000000000001" TMPDIR="$BATS_TEST_TMPDIR"
+    maestro_agents "{\"agents\":[{\"id\":\"aaaaaaaa-0000-0000-0000-000000000001\",\"name\":\"alpha\",\"workingDirectory\":\"${HOME}/work/project\",\"credential\":{\"kind\":\"oauth-token\",\"secret\":\"ACME_MAX\"},\"credentialCheck\":{\"state\":\"mismatch\"}}]}"
+    status_line "${HOME}/work/project" >/dev/null; sleep 1
+    run status_line "${HOME}/work/project"
+    assert_line --index 0 --partial "$(printf '\033[31m')⚠ wrong account, set to token ACME_MAX"
+}
+
+@test "status line: an agent with no account setting shows no account part" {
+    export TMPDIR="$BATS_TEST_TMPDIR"
+    maestro_agents "{\"agents\":[{\"name\":\"alpha\",\"workingDirectory\":\"${HOME}/work/project\"}]}"
+    run status_line "${HOME}/work/project"
+    refute_output --partial "acct "
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.4
+
+### The status line shows plan usage limits and the agent's account
+
+- Row 2: the subscription usage limits Claude Code reports, after the cost: `5h 42% · wk 18%`, yellow from 80% and red from 95%. They travel in the status report to AI Maestro as `limits: { fiveHour, week }` (`percent`, `resetsAt` in epoch seconds).
+- Row 1: under AI Maestro, the account the agent is set to use (its Model access setting), such as `acct Acme Max plan`. It turns red ("⚠ wrong account, set to ...") when AI Maestro reports that the running session signs in with another account, and yellow when it cannot confirm. The agent list is cached as before; a stale copy is refreshed in the background, so the render never waits for the server.
+- Tests: `statusline_row2.bats` (limits, report) and `session_identity.bats` (account).
+
 ## 0.5.3
 
 ### A person's message says whether they manage the agent
