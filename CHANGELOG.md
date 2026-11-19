@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.5
+
+### amp-send says when a message is held for approval
+
+A provider can hold a message until someone approves it (AI Maestro's `ask` policy rules answer 202 with `status: "held"` and a `message`). `amp-send` treated that as sent. It now prints "⏸  Message held for approval" instead of "✅ Message sent", and a `Held:` line with the provider's reason: who must approve, the request id and when it expires. Other answers print as before.
+
+- `scripts/amp-helper.sh`: `amp_send_title` and `amp_send_held_reason`, used by both send paths in `scripts/amp-send.sh`.
+- Tests: `tests/unit/send_held_result.bats`.
+
 ## 0.5.4
 
 ### The status line shows plan usage limits and the agent's account

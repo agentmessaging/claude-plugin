@@ -507,7 +507,7 @@ send_via_api() {
         local delivery_method
         delivery_method=$(echo "$body" | jq -r '.method // "api"')
 
-        echo "✅ Message sent via ${label}"
+        amp_send_title "$delivery_status" "$label"
         echo ""
         echo "  To:       ${full_recipient}"
         echo "  Subject:  ${SUBJECT}"
@@ -516,6 +516,7 @@ send_via_api() {
         echo "  ID:       ${msg_id}"
         echo "  Status:   ${delivery_status}"
         echo "  Method:   ${delivery_method}"
+        amp_send_held_reason "$delivery_status" "$body"
 
         local att_count
         att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
@@ -857,7 +858,7 @@ else
 
         DELIVERY_STATUS=$(echo "$BODY" | jq -r '.status // "queued"' 2>/dev/null)
 
-        echo "✅ Message sent via ${ROUTE}"
+        amp_send_title "$DELIVERY_STATUS" "$ROUTE"
         echo ""
         echo "  To:       ${FULL_RECIPIENT}"
         echo "  Subject:  ${SUBJECT}"
@@ -865,6 +866,7 @@ else
         echo "  Type:     ${TYPE}"
         echo "  ID:       ${MSG_ID}"
         echo "  Status:   ${DELIVERY_STATUS}"
+        amp_send_held_reason "$DELIVERY_STATUS" "$BODY"
 
         ext_att_count=$(echo "$ATTACHMENTS_JSON" | jq 'length' 2>/dev/null || echo "0")
         if [ "$ext_att_count" -gt 0 ]; then

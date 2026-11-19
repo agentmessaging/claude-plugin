@@ -334,6 +334,26 @@ AMP_MAX_TOTAL_ATTACHMENT_SIZE="${AMP_MAX_TOTAL_ATTACHMENT_SIZE:-104857600}"  # 1
 # AI Maestro connection
 AMP_MAESTRO_URL="${AMP_MAESTRO_URL:-http://localhost:23000}"
 
+# The first line of a send result. A provider answers 202 with status "held"
+# when a policy holds the message for approval: then it was not sent yet.
+amp_send_title() {
+    local status="$1" via="$2"
+    if [ "$status" = "held" ]; then
+        echo "⏸  Message held for approval via ${via}"
+    else
+        echo "✅ Message sent via ${via}"
+    fi
+}
+
+# For a held message, the provider's reason (who must approve, request id, expiry)
+amp_send_held_reason() {
+    local status="$1" body="$2" reason
+    [ "$status" = "held" ] || return 0
+    reason=$(echo "$body" | jq -r '.message // empty' 2>/dev/null)
+    [ -n "$reason" ] && echo "  Held:     ${reason}"
+    return 0
+}
+
 # Tell a local AI Maestro that a message just landed in a same-host recipient's
 # inbox, so it wakes the agent now instead of at its next inbox sweep. The inbox
 # file is already written and stays the source of truth: this is a best-effort
