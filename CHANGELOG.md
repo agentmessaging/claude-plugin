@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.5
+
+### amp-read checks provider notices with the provider's published key
+
+AMP 07 "Provider Notices" (protocol 0.1.3): a provider sends notices, such as the outcome of a quarantined message, from `_provider@<tenant>.<provider>`, signed with its provider key. `amp_verify_message` now follows rule 4 for them:
+
+- The sender must be an address of the provider named in the signed `payload.context.provider`; otherwise the notice is `BAD SIGNATURE`.
+- The key comes from provider discovery, never from a key looked up for the `_provider` address: for a `*.local` provider, the AI Maestro the agent talks to (`/api/v1/info`); for any other, `https://<provider>/.well-known/agent-messaging.json`, then `https://api.<provider>/...`. The key is cached for an hour in `providers/`.
+- A notice whose provider key cannot be found stays `UNVERIFIED`. A notice another host forwarded is still taken from that host's check, as for all forwarded mail.
+
+Other messages read exactly as before (checked on 493 real signed messages: no change).
+
+- Tests: `tests/unit/verify_provider_notice.bats`.
+
 ## 0.5.4
 
 ### The status line shows plan usage limits and the agent's account
