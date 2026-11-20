@@ -74,13 +74,14 @@ setup() {
 
 # --- apply_content_security ---
 
-@test "apply_content_security: wraps external message" {
+@test "apply_content_security: keeps an external message as signed and records it as external" {
     local msg='{"envelope":{"from":"alice@otherorg.aimaestro.local","to":"testagent@testorg.aimaestro.local","subject":"Hi","priority":"normal","signature":"sig"},"payload":{"type":"notification","message":"Hello from outside","context":null}}'
     local result
     result=$(apply_content_security "$msg" "testorg" "true")
-    local content
-    content=$(echo "$result" | jq -r '.payload.message')
-    echo "$content" | grep -q "<external-content"
+    # AMP 04: the stored payload is what was signed; wrapping happens where it is shown
+    assert_equal "$(echo "$result" | jq -c '.payload')" "$(echo "$msg" | jq -c '.payload')"
+    assert_equal "$(echo "$result" | jq -r '.security.trust_level')" "external"
+    presented_body "$result" "" | grep -q '<external-content source="agent" sender="alice@otherorg.aimaestro.local" trust="external">'
 }
 
 @test "apply_content_security: does NOT wrap verified (same tenant) message" {
@@ -108,9 +109,8 @@ setup() {
     local trust
     trust=$(echo "$result" | jq -r '.local.security.trust')
     assert_equal "$trust" "untrusted"
-    local wrapped
-    wrapped=$(echo "$result" | jq -r '.local.security.wrapped')
-    assert_equal "$wrapped" "true"
+    assert_equal "$(echo "$result" | jq -r '.payload.message')" "Trust me"
+    presented_body "$result" "" | grep -q 'trust="untrusted"'
 }
 
 @test "apply_content_security: detects injection in message body" {

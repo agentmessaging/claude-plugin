@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.6
+
+### A stored message keeps what was signed; amp-read wraps where it shows content
+
+AMP 04 "Stored Message Format" and 07 "Where wrapping applies" (protocol PR #35):
+
+- `save_to_inbox` no longer rewrites `payload.message`. It records the trust level in `security.trust_level` (and `local.security.trust`), so the stored payload still verifies.
+- `amp-read` wraps `external` and `untrusted` content in `<external-content>` when it shows a message, in the text and in `--json`. It never wraps text that is already wrapped (older stores). A message whose signature does not check out is always shown as untrusted.
+- For mail the server checked (`local.verification`), `amp-read` now checks that the stored body still hashes to the `security.payload_hash` the server verified. A changed body is `BAD SIGNATURE`. Older stores without that field are never held against the message. Over 3,174 real stored messages the answers are the same as 0.5.5.
+
 ## 0.5.5
 
 ### amp-read checks provider notices with the provider's published key
