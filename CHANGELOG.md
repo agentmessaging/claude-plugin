@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.7
+
+### A same-machine send goes through the provider
+
+AMP 05: an agent's mail goes through its provider's route. When the agent is registered with a local provider (AI Maestro), `amp-send` used to write straight into the recipient's inbox whenever the recipient was on the same machine. That skipped the provider's checks (AI Maestro's message rules, the sender known by its API key, the wake-up).
+
+- With a local provider registration, every send goes to the provider's `/route`, also for a recipient on this machine.
+- Only when the provider does not answer, a recipient on this machine is written directly, and `amp-send` says so.
+- That fallback is refused when the host has AI Maestro message rules (`~/.aimaestro/policy.json`, or its saved copy `policy.json.last-good`), because a direct write would skip them. `AIMAESTRO_POLICY_FILE` names another rules file.
+- Without a provider registration, nothing changes.
+
 ## 0.5.6
 
 ### A stored message keeps what was signed; amp-read wraps where it shows content
