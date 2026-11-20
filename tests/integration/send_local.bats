@@ -86,3 +86,37 @@ EOF
     status=$(jq -r '.local.status' "$msg_file")
     assert_equal "$status" "unread"
 }
+
+@test "send_local: with the provider answering, the provider delivers and the sender writes no inbox" {
+    mock_curl 200 '{"id":"msg_1_abc","status":"delivered","method":"local"}'
+    run bash "${SCRIPTS_DIR}/amp-send.sh" "alice" "Via provider" "Body"
+    assert_success
+    assert_output --partial "Message sent via AMP routing"
+    run get_curl_calls
+    assert_output --partial "/route"
+    [ -z "$(find "${RECIPIENT_DIR}/messages/inbox" -name 'msg_*.json')" ]
+}
+
+@test "send_local: provider not answering and the host has rules: refused, nothing written" {
+    mkdir -p "${HOME}/.aimaestro"
+    echo '{"version":1,"rules":[]}' > "${HOME}/.aimaestro/policy.json"
+    run bash "${SCRIPTS_DIR}/amp-send.sh" "alice" "Blocked" "Body"
+    assert_failure
+    assert_output --partial "Not sent"
+    [ -z "$(find "${RECIPIENT_DIR}/messages/inbox" -name 'msg_*.json')" ]
+}
+
+@test "send_local: a deleted rules file still counts while its saved copy is there" {
+    mkdir -p "${HOME}/.aimaestro"
+    echo '{"version":1,"rules":[]}' > "${HOME}/.aimaestro/policy.json.last-good"
+    run bash "${SCRIPTS_DIR}/amp-send.sh" "alice" "Blocked" "Body"
+    assert_failure
+    [ -z "$(find "${RECIPIENT_DIR}/messages/inbox" -name 'msg_*.json')" ]
+}
+
+@test "send_local: provider not answering and no rules: written directly, and it says so" {
+    run bash "${SCRIPTS_DIR}/amp-send.sh" "alice" "Direct" "Body"
+    assert_success
+    assert_output --partial "is not answering; delivering straight to the recipient's inbox"
+    refute_output --partial "Failed to send"
+}
