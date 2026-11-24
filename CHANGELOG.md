@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.8
+
+### Registering a name that exists proves its key
+
+AMP 03 "Registering an Existing Name": a public key is public, so a provider gives a new API key for a name that is already registered only to the agent itself. AI Maestro answers a re-registration from outside the agent's own session with `401 proof_required` and the values to sign.
+
+- `amp-register`, `amp-init` and `amp-send`'s auto-registration answer `proof_required` once: they sign `"amp-register-proof\n" + timestamp + "\n" + provider + "\n" + tenant + "\n" + name + "\n" + fingerprint` with the agent's Ed25519 key and send the registration again with `proof` (base64url of the signature followed by the timestamp). One helper does it: `amp_register_request` in `amp-helper.sh`.
+- They sign only for the name being registered, and only when the fingerprint the provider names is the agent's own. Otherwise nothing is signed and the command says why.
+- In the agent's own session nothing changes. Other answers (`409 name_taken`, 400, no answer) are as before.
+- Registration headers go to curl on stdin, so an API key or user key no longer shows on curl's command line.
+- Thanks to Alejandro Vargas (alejo-vargas), who found the takeover and wrote the first version of this change.
+
 ## 0.5.7
 
 ### A same-machine send goes through the provider
