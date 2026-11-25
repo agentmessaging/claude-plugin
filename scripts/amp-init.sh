@@ -430,7 +430,7 @@ if [ "$ROTATION_MODE" = true ]; then
                 "${REG_API_URL}/auth/rotate-keys" \
                 -H "Authorization: Bearer ${REG_API_KEY}" \
                 -H "Content-Type: application/json" \
-                -d "$ROTATE_REQUEST" 2>&1) || true
+                -d @- <<<"$ROTATE_REQUEST" 2>&1) || true
 
             ROTATE_HTTP=$(echo "$ROTATE_RESPONSE" | tail -n1)
             ROTATE_BODY=$(echo "$ROTATE_RESPONSE" | sed '$d')

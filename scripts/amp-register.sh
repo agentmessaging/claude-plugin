@@ -407,7 +407,7 @@ if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
     if [ -n "$MAESTRO_AGENT_ID" ] && [ -n "$AMP_MAESTRO_CALLBACK" ]; then
         curl -s -X POST "${AMP_MAESTRO_CALLBACK}/api/agents/${MAESTRO_AGENT_ID}/amp/addresses" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n \
+            -d @- <<<"$(jq -n \
                 --arg address "$ADDRESS" \
                 --arg provider "$PROVIDER_LOWER" \
                 --arg type "cloud" \

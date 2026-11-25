@@ -29,8 +29,10 @@ stub_provider() {
 #!/bin/bash
 d="$(cd "$(dirname "$0")/.." && pwd)"
 body="" prev=""
-for a in "$@"; do case "$prev" in -d) body="$a" ;; esac; prev="$a"; done
+for a in "$@"; do case "$prev" in -d|--data-binary) body="$a" ;; esac; prev="$a"; done
 cat > /dev/null   # headers on stdin
+# The body comes from a file (--data-binary @path), so non-ASCII text survives Windows' curl
+case "$body" in @*) body=$(cat "${body#@}") ;; esac
 printf '%s\n' "$body" >> "${d}/bodies.log"
 mode=$(cat "${d}/mode")
 fp="SHA256:$("$OPENSSL_STUB" pkey -pubin -in "${d}/pub.pem" -outform DER | tail -c 32 | "$OPENSSL_STUB" dgst -sha256 -binary | base64 | tr -d '\n')"

@@ -488,7 +488,7 @@ send_via_api() {
         -X POST "${send_url}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${api_key}" \
-        -d "$api_body" 2>&1)
+        -d @- <<<"$api_body" 2>&1)
 
     local http_code
     http_code=$(echo "$response" | tail -n1)
@@ -863,7 +863,7 @@ else
         -X POST "${EXT_SEND_URL}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${API_KEY}" \
-        -d "$EXT_SEND_BODY")
+        -d @- <<<"$EXT_SEND_BODY")
 
     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
     BODY=$(echo "$RESPONSE" | sed '$d')

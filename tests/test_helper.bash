@@ -219,7 +219,15 @@ mock_curl() {
     cat > "${mock_dir}/curl" << 'MOCK_EOF'
 #!/bin/bash
 _mock_dir="$(cd "$(dirname "$0")/.." && pwd)"
-echo "$@" >> "${_mock_dir}/curl_calls.log"
+# The scripts send bodies on stdin (-d @-) or from a file (--data-binary @path); log the body with the arguments
+_body="" _prev=""
+for _a in "$@"; do
+    case "$_prev" in -d|--data|--data-binary|--data-raw)
+        case "$_a" in @-) _body=$(cat) ;; @*) _body=$(cat "${_a#@}" 2>/dev/null) ;; esac ;;
+    esac
+    _prev="$_a"
+done
+echo "$@ $(printf '%s' "$_body" | tr '\n' ' ')" >> "${_mock_dir}/curl_calls.log"
 if echo "$@" | grep -q -- '-w'; then
     cat "${_mock_dir}/curl_response_body.txt"
     echo ""
