@@ -123,6 +123,9 @@ CTX_TOKENS=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0' | c
 OVER_200K=$(echo "$input" | jq -r '.exceeds_200k_tokens // false')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 CWD=$(echo "$input" | jq -r '.workspace.current_dir // empty')
+# Native Windows (Git Bash): Claude Code reports C:\Users\...; in bash's own form the home folder shortens to ~,
+# and echo -e below finds no backslashes to read as escapes (\a would ring the terminal bell)
+case "$CWD" in [A-Za-z]:\\*|[A-Za-z]:/*) command -v cygpath >/dev/null 2>&1 && CWD=$(cygpath -u "$CWD") ;; esac
 # Claude Code's native session name (set by `claude --name` / `/rename`). Present
 # only when a custom or AI-generated title exists; used below as an identity hint.
 SESSION_NAME=$(echo "$input" | jq -r '.session_name // empty')
@@ -519,7 +522,7 @@ if [ -n "$AGENT_UUID" ] && [ -d "${AGENTS_BASE}/${AGENT_UUID}" ]; then
                  + (if $limWk == "" then {} else {week: ($limWk | split(" ") | {percent: (.[0] | tonumber), resetsAt: (.[1] | tonumber)})} end))} end)' 2>/dev/null)
         if [ -n "$_snap_json" ]; then
             curl -s -m 1 -X POST "${AMP_MAESTRO_URL:-http://localhost:23000}/api/agents/${AGENT_UUID}/status-snapshot" \
-                -H 'Content-Type: application/json' -d "$_snap_json" >/dev/null 2>&1 &
+                -H 'Content-Type: application/json' -d @- <<<"$_snap_json" >/dev/null 2>&1 &
         fi
     fi
 fi

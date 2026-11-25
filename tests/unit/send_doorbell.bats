@@ -14,7 +14,10 @@ setup() {
     mkdir -p "$STUBS"
     cat > "${STUBS}/curl" <<STUB
 #!/bin/bash
-echo "\$@" >> "${BATS_TEST_TMPDIR}/curl.calls"
+# The body comes on stdin (-d @-); record it with the arguments
+body=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-d" ] && [ "\$a" = "@-" ] && body=\$(cat); prev="\$a"; done
+echo "\$@ \$body" >> "${BATS_TEST_TMPDIR}/curl.calls"
 [ -n "\$CURL_STUB_SLEEP" ] && sleep "\$CURL_STUB_SLEEP"
 exit "\${CURL_STUB_EXIT:-0}"
 STUB

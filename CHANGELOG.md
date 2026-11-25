@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Native Windows (Git Bash)
+
+AI Maestro runs on Windows without WSL (23blocks-OS/ai-maestro, F041); the AMP scripts run there in Git Bash. Git for Windows' curl converts its arguments to the ANSI code page, so accents and emoji in request bodies arrived mangled.
+
+- Request bodies go to curl on stdin (`-d @- <<<"$body"`); `amp_register_request`, whose headers already use stdin, sends its body from a temporary file (`--data-binary @file`, a Windows path under Git Bash).
+- `sign_message` warns on stderr when OpenSSL cannot sign. OpenSSL 1.1.1 (Git for Windows before 2023, older Linux releases) creates Ed25519 keys but cannot sign with `-rawin`; messages went out unsigned without a word.
+- `amp-statusline`: the Windows working folder is converted with `cygpath -u`.
+- Tests: the curl stubs read the body from stdin or the file.
+
 ## 0.5.8
 
 ### Registering a name that exists proves its key

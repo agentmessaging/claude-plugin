@@ -16,7 +16,7 @@ JSON
     DIR="${HOME}/work/acme"
     mkdir -p "$DIR"
 
-    # A curl that records instead of connecting: the URL and the -d body.
+    # A curl that records instead of connecting: the URL and the body.
     STUB_BIN="${BATS_TEST_TMPDIR}/bin"
     mkdir -p "$STUB_BIN"
     cat > "${STUB_BIN}/curl" <<'STUB'
@@ -24,11 +24,13 @@ JSON
 url=""; body=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        -d) body="$2"; shift 2 ;;
+        -d|--data-binary) body="$2"; shift 2 ;;
         http*) url="$1"; shift ;;
         *) shift ;;
     esac
 done
+# The body comes on stdin (-d @-) or from a file (@path), as the scripts send it
+case "$body" in @-) body=$(cat) ;; @*) body=$(cat "${body#@}") ;; esac
 case "$url" in
     */status-snapshot) echo "$url" >> "${CURL_LOG_DIR}/snapshot.urls"; echo "$body" >> "${CURL_LOG_DIR}/snapshot.bodies" ;;
     *) echo "$url" >> "${CURL_LOG_DIR}/other.urls" ;;

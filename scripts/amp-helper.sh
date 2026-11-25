@@ -349,7 +349,7 @@ amp_ring_doorbell() {
     body=$(jq -nc --arg r "$recipient" --arg m "$msg_id" '{recipient:$r,messageId:$m}' 2>/dev/null) || return 0
     ( curl -s -m 3 --connect-timeout 1 -o /dev/null -X POST \
         "${AMP_MAESTRO_URL}/api/messages/doorbell" \
-        -H 'Content-Type: application/json' -d "$body" >/dev/null 2>&1 & ) >/dev/null 2>&1
+        -H 'Content-Type: application/json' -d @- <<<"$body" >/dev/null 2>&1 & ) >/dev/null 2>&1
     return 0
 }
 
@@ -986,6 +986,10 @@ sign_message() {
     # Note: Ed25519 keys require -rawin flag for raw message signing
     if $OPENSSL_BIN pkeyutl -sign -inkey "${private_key}" -rawin -in "$tmp_msg" -out "$tmp_sig" 2>/dev/null; then
         base64 < "$tmp_sig" | tr -d '\n'
+    else
+        # OpenSSL 1.1.1 makes Ed25519 keys but cannot sign with -rawin (3.0 can): say so rather than send unsigned
+        # without a word. Git for Windows before 2023 and older Linux releases ship 1.1.1.
+        echo "Warning: could not sign the message with $($OPENSSL_BIN version 2>/dev/null | head -1); Ed25519 signing needs OpenSSL 3. It goes out unsigned." >&2
     fi
 }
 
@@ -1017,9 +1021,17 @@ amp_register_fingerprint() {
 
 _amp_register_post() {
     local url="$1" body="$2" auth="$3"; shift 3
-    # Headers go in on stdin, so a key never shows on curl's command line
+    # Headers go in on stdin, so a key never shows on curl's command line. The body goes in a file:
+    # Git for Windows' curl converts its arguments to the ANSI code page, which mangled non-ASCII text.
+    local body_file body_arg
+    body_file=$(mktemp) || return 1
+    printf '%s' "$body" > "$body_file"
+    body_arg="$body_file"
+    # A Windows curl cannot open an MSYS path such as /tmp/...
+    if command -v cygpath >/dev/null 2>&1; then body_arg=$(cygpath -m "$body_file"); fi
     { printf 'Content-Type: application/json\n'; [ -n "$auth" ] && printf '%s\n' "$auth"; } | \
-        curl -s -w "\n%{http_code}" "$@" -X POST "$url" -H @- -d "$body" 2>/dev/null || true
+        curl -s -w "\n%{http_code}" "$@" -X POST "$url" -H @- --data-binary "@${body_arg}" 2>/dev/null || true
+    rm -f "$body_file"
 }
 
 amp_register_request() {
@@ -2276,7 +2288,7 @@ upload_attachment() {
         -X POST "${api_url}/attachments/upload" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${api_key}" \
-        -d "$init_body" 2>&1)
+        -d @- <<<"$init_body" 2>&1)
 
     local init_http
     init_http=$(echo "$init_response" | tail -n1)
